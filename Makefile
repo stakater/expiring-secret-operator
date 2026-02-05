@@ -1,0 +1,639 @@
+# VERSION defines the project version for the bundle.
+# Update this value when you upgrade the version of your project.
+# To re-generate a bundle for another specific version without changing the standard setup, you can:
+# - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
+# - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
+VERSION ?= 0.0.1
+OPERATOR_NAME ?= grafana-extension
+CATALOG_DIR_PATH ?= catalog
+DOCKER_REPO_BASE ?= ghcr.io/stakater
+PROJECT_NAME ?= telemetry.tenantoperator.stakater.com
+
+TEST_NAMESPACE ?= grafana-extension-system
+
+# CHANNELS define the bundle channels used in the bundle.
+# Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
+# To re-generate a bundle for other specific channels without changing the standard setup, you can:
+# - use the CHANNELS as arg of the bundle target (e.g make bundle CHANNELS=candidate,fast,stable)
+# - use environment variables to overwrite this value (e.g export CHANNELS="candidate,fast,stable")
+ifneq ($(origin CHANNELS), undefined)
+BUNDLE_CHANNELS := --channels=$(CHANNELS)
+endif
+
+# DEFAULT_CHANNEL defines the default channel used in the bundle.
+# Add a new line here if you would like to change its default config. (E.g DEFAULT_CHANNEL = "stable")
+# To re-generate a bundle for any other default channel without changing the default setup, you can:
+# - use the DEFAULT_CHANNEL as arg of the bundle target (e.g make bundle DEFAULT_CHANNEL=stable)
+# - use environment variables to overwrite this value (e.g export DEFAULT_CHANNEL="stable")
+ifneq ($(origin DEFAULT_CHANNEL), undefined)
+BUNDLE_DEFAULT_CHANNEL := --default-channel=$(DEFAULT_CHANNEL)
+endif
+BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
+
+# IMAGE_TAG_BASE defines the docker.io namespace and part of the image name for remote images.
+# This variable is used to construct full image tags for bundle and catalog images.
+#
+# For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
+# telemetry.tenantoperator.stakater.com/grafana-tenant-extension-bundle:$VERSION and telemetry.tenantoperator.stakater.com/grafana-tenant-extension-catalog:$VERSION.
+IMAGE_TAG_BASE ?= $(DOCKER_REPO_BASE)/$(OPERATOR_NAME)
+
+# BUNDLE_IMG defines the image:tag used for the bundle.
+# You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
+BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)$(GIT_TAG)
+
+# BUNDLE_GEN_FLAGS are the flags passed to the operator-sdk generate bundle command
+BUNDLE_GEN_FLAGS ?= -q --overwrite --version $(VERSION) $(BUNDLE_METADATA_OPTS)
+
+# USE_IMAGE_DIGESTS defines if images are resolved via tags or digests
+# You can enable this value if you would like to use SHA Based Digests
+# To enable set flag to true
+USE_IMAGE_DIGESTS ?= false
+ifeq ($(USE_IMAGE_DIGESTS), true)
+	BUNDLE_GEN_FLAGS += --use-image-digests
+endif
+
+# Set the Operator SDK version to use. By default, what is installed on the system is used.
+# This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
+OPERATOR_SDK_VERSION ?= v1.39.2
+# Image URL to use all building/pushing image targets
+IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)$(GIT_TAG)
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+ENVTEST_K8S_VERSION = 1.31.0
+
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
+ifeq (,$(shell go env GOBIN))
+GOBIN=$(shell go env GOPATH)/bin
+else
+GOBIN=$(shell go env GOBIN)
+endif
+
+# CONTAINER_TOOL defines the container tool to be used for building images.
+# Be aware that the target commands are only tested with Docker which is
+# scaffolded by default. However, you might want to replace it to use other
+# tools. (i.e. podman)
+CONTAINER_TOOL ?= docker
+
+# Setting SHELL to bash allows bash commands to be executed by recipes.
+# Options are set to exit when a recipe line exits non-zero or a piped command fails.
+SHELL = /usr/bin/env bash -o pipefail
+.SHELLFLAGS = -ec
+
+TEST_CLUSTER_NAME ?= e2e-test-cluster
+
+.PHONY: all
+all: build
+
+##@ General
+
+# The help target prints out all targets with their descriptions organized
+# beneath their categories. The categories are represented by '##@' and the
+# target descriptions by '##'. The awk command is responsible for reading the
+# entire set of makefiles included in this invocation, looking for lines of the
+# file as xyz: ## something, and then pretty-format the target and help. Then,
+# if there's a line with ##@ something, that gets pretty-printed as a category.
+# More info on the usage of ANSI control characters for terminal formatting:
+# https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
+# More info on the awk command:
+# http://linuxcommand.org/lc3_adv_awk.php
+
+.PHONY: help
+help: ## Display this help.
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Development
+
+.PHONY: manifests
+manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+
+.PHONY: generate
+generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+
+.PHONY: fmt
+fmt: ## Run go fmt against code.
+	go fmt ./...
+
+.PHONY: vet
+vet: ## Run go vet against code.
+	go vet ./...
+
+TEST_ARGS = -v -test.v
+ifdef VERBOSE
+	TEST_ARGS += -ginkgo.v
+endif
+
+ifdef VERY_VERBOSE
+	TEST_ARGS += -ginkgo.vv
+endif
+
+ifdef QUIET
+	TEST_ARGS = ""
+endif
+
+ifdef LABEL
+	TEST_ARGS += -ginkgo.label-filter="$(LABEL)"
+endif
+
+PKGS     := $(shell go list ./... | grep -v /e2e)
+COVDATA  := $(shell go tool -n covdata 2>/dev/null)
+
+.PHONY: test
+test: manifests generate fmt vet envtest
+ifdef COVDATA
+	# Full coverage path (works when covdata exists)
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	go test $(PKGS) -coverprofile=cover.out $(TEST_ARGS)
+else
+	# Fallback: run tests without coverage to avoid covdata error
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	go test $(PKGS) $(TEST_ARGS)
+endif
+
+# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
+.PHONY: test-e2e  # Run e2e tests with guaranteed cleanup even on failure
+test-e2e:
+	@{ \
+		$(MAKE) pre-e2e-test && \
+		$(MAKE) run-e2e-test; \
+		exit_code=$$?; \
+		echo "Cleaning up..."; \
+		$(MAKE) post-e2e-test; \
+		exit $$exit_code; \
+	}
+
+.PHONY: run-e2e-test
+run-e2e-test:
+	go test ./test/e2e/ $(TEST_ARGS)
+
+.PHONY: pre-e2e-test
+#pre-e2e-test: kind kustomize install-prometheus-operator install-certmanager install-gateway docker-build
+pre-e2e-test: kind kustomize install-prometheus-operator install-certmanager docker-build load-image-to-kind
+	@echo "Loading docker image into kind cluster..."
+	$(KIND) load docker-image $(IMG) --name $(TEST_CLUSTER_NAME)
+	@echo "Installing CRDs and deploying operator..."
+	$(MAKE) install
+	$(MAKE) deploy
+
+#	kubectl get pods -l control-plane=controller-manager \
+#		-o go-template="{{ range .items }}{{ if not .metadata.deletionTimestamp }}{{ .metadata.name }}{{ \"\\n\" }}{{ end }}{{ end }}" \
+#		-n $(TEST_NAMESPACE)
+
+#	# controller-manager
+#	kubectl get pods controllerPodName -o jsonpath={.status.phase} -n $(TEST_NAMESPACE)
+
+.PHONY: post-e2e-test
+#post-e2e-test: uninstall-gateway uninstall-certmanager uninstall-prometheus-operator
+post-e2e-test: uninstall-certmanager uninstall-prometheus-operator
+	## Make sure to undeploy before uninstalling CRDs
+
+.PHONY: install-dependencies
+#install-dependencies: tenant-crd-install install-prometheus-operator install-certmanager install-grafana-operator install-grafana-instance
+install-dependencies: install-prometheus-operator install-certmanager
+
+.PHONY: lint
+lint: golangci-lint ## Run golangci-lint linter
+	$(GOLANGCI_LINT) run --timeout=10m
+
+.PHONY: lint-fix
+lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
+	$(GOLANGCI_LINT) run --fix
+
+##@ Helm
+
+HELM_CHART_DIR ?= charts/mto-extension-grafana
+HELM_VERSION ?= $(VERSION)$(GIT_TAG)
+HELM_REGISTRY ?= ghcr.io/stakater/charts
+HELM_CHART_NAME ?= mto-extension-grafana
+HELM_MK_URL ?= https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/makefiles/helm.mk
+HELM_MK := makefiles/helm.mk
+
+define download-file
+	@if [ -f "$(2)" ]; then \
+		echo "$(2) already exists; skipping download"; \
+	else \
+		echo "Downloading $(1) -> $(2)"; \
+		mkdir -p $(dir $(2)); \
+		curl -H 'Cache-Control: no-cache' -fsSL $(CURL_OPTS) "$(1)" -o "$(2)" || { echo "Failed to download $(1)"; exit 1; }; \
+	fi
+endef
+	   
+.PHONY: download-helm-mk
+download-helm-mk: ## Download remote makefile into makefiles/helm.mk (only if missing)
+	$(call download-file,$(HELM_MK_URL),$(HELM_MK))
+
+
+.PHONY: helm-release
+helm-release: manifests kustomize helmify-bin yq download-helm-mk ## Download remote helm.mk and run its helm-release target
+	@echo "Invoking downloaded helm makefile: $(HELM_MK)"
+	PATH="$(LOCALBIN):$$PATH" $(MAKE) -f $(HELM_MK) helm-release \
+		VERSION=$(VERSION) \
+		GIT_TAG=$(GIT_TAG) \
+		GIT_TOKEN=$(GHCR_TOKEN) \
+		GIT_USER=$(GHCR_USERNAME) \
+		KUSTOMIZE=$(KUSTOMIZE) \
+		HELM_CHART_NAME=$(HELM_CHART_NAME) \
+		HELMIFY_ARGS="-original-name" \
+		HELM_REGISTRY=$(HELM_REGISTRY) \
+		IMG=$(IMG)
+
+##@ Build
+
+.PHONY: build
+build: manifests generate fmt vet ## Build manager binary.
+	go build -o bin/manager cmd/main.go
+
+.PHONY: run
+run: manifests generate fmt vet ## Run a controller from your host.
+	go run ./cmd/main.go
+
+# If you wish to build the manager image targeting other platforms you can use the --platform flag.
+# (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
+# More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+.PHONY: docker-build
+docker-build: ## Build docker image with the manager.
+ifndef CI
+	$(CONTAINER_TOOL) build -f local.Dockerfile --ssh default=$${SSH_AUTH_SOCK} -t ${IMG} .
+else
+	$(CONTAINER_TOOL) build --build-arg GIT_USER=${GIT_USER} --build-arg GIT_TOKEN=${GIT_TOKEN} -t ${IMG} .
+endif
+
+.PHONY: docker-push
+docker-push: ## Push docker image with the manager.
+	$(CONTAINER_TOOL) push ${IMG}
+
+# PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
+# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
+# - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
+# - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+# - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
+# To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
+PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+.PHONY: docker-buildx
+docker-buildx: ## Build and push docker image for the manager for cross-platform support
+	@set -euo pipefail; \
+	# make a temp Dockerfile that injects --platform=${BUILDPLATFORM} in the FIRST FROM
+	tmp="$$(mktemp -t Dockerfile.cross.XXXXXX)"; \
+	awk 'BEGIN{done=0} !done && $$1=="FROM"{ sub(/^FROM/,"FROM --platform=\\$${BUILDPLATFORM}"); done=1 } {print}' Dockerfile > "$$tmp"; \
+	# ensure the builder exists (idempotent)
+	if ! $(CONTAINER_TOOL) buildx inspect mto-extension-grafana-builder >/dev/null 2>&1; then \
+	  $(CONTAINER_TOOL) buildx create --name mto-extension-grafana-builder --driver docker-container >/dev/null; \
+	fi; \
+	# build using that builder (don’t mutate global builder state)
+	$(CONTAINER_TOOL) buildx build \
+	  --builder mto-extension-grafana-builder \
+	  --push \
+	  --platform="$(PLATFORMS)" \
+	  --tag "$(IMG)" \
+	  -f "$$tmp" .; \
+	rm -f "$$tmp"
+
+.PHONY: build-installer
+build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
+	mkdir -p dist
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default > dist/install.yaml
+
+.PHONY: cluster
+cluster: ## Setup Kind cluster with specified action (default: cluster). Usage: make cluster ACTION=<action>
+	curl -sSL https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/scripts/setup-kind-cluster.sh | \
+	TEST_CLUSTER_NAME=$(TEST_CLUSTER_NAME) \
+	IMG=$(IMG) \
+	CONTAINER_TOOL=$(CONTAINER_TOOL) \
+	KIND_VERSION=$(KIND_VERSION) \
+	LOCALBIN=$(LOCALBIN) \
+	OPERATOR_NAMESPACE=$(OPERATOR_NS) \
+	PULL_SECRET_NAME=saap-dockerconfigjson \
+	GHCR_USERNAME=$(GHCR_USERNAME) \
+	GHCR_TOKEN=$(GHCR_TOKEN) \
+	bash -s $(ACTION)
+
+.PHONY: kind
+kind: $(KIND)
+$(KIND): $(LOCALBIN)
+	$(call go-install-tool,$(KIND),sigs.k8s.io/kind,$(KIND_VERSION))
+
+.PHONY: load-image
+load-image: kind ## Load local image into Kind (if present).
+	@if $(CONTAINER_TOOL) images --format "table {{.Repository}}:{{.Tag}}" | grep "^$(IMG)"; then \
+		echo "Found local image $(IMG), loading into Kind cluster $(TEST_CLUSTER_NAME)"; \
+		$(KIND) load docker-image $(IMG) --name $(TEST_CLUSTER_NAME); \
+	else \
+		echo "Local image $(IMG) not found, cluster will pull from registry"; \
+	fi
+
+.PHONY: pull-secret
+pull-secret: ## Create GHCR pull secret in operator namespace.
+	echo "Creating pull secret in namespace '$(OPERATOR_NS)'"; \
+	$(KUBECTL) create namespace $(OPERATOR_NS) --dry-run=client -o yaml | $(KUBECTL) apply -f - ;\
+	$(KUBECTL) -n $(OPERATOR_NS) create secret docker-registry saap-dockerconfigjson \
+		--docker-server=ghcr.io \
+		--docker-username=${GHCR_USERNAME} \
+		--docker-password=${GHCR_TOKEN} \
+		--dry-run=client -o yaml | $(KUBECTL) apply -f -
+
+##@ Deployment
+
+ifndef ignore-not-found
+  ignore-not-found = false
+endif
+
+.PHONY: install
+install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+	$(KUSTOMIZE) build config/crd | $(KUBECTL) apply -f -
+
+.PHONY: uninstall
+uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: deploy
+deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+
+.PHONY: undeploy
+undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+##@ Dependencies
+
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+## Tool Binaries
+KUBECTL ?= kubectl
+KUSTOMIZE ?= $(LOCALBIN)/kustomize
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+ENVTEST ?= $(LOCALBIN)/setup-envtest
+GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+HELM ?= $(shell command -v helm || echo $(LOCALBIN)/helm)
+HELMIFY ?= $(LOCALBIN)/helmify
+KIND ?= $(LOCALBIN)/kind
+
+## Tool Versions
+KUSTOMIZE_VERSION ?= v5.4.3
+#CONTROLLER_TOOLS_VERSION ?= v0.16.1
+CONTROLLER_TOOLS_VERSION ?= v0.19.0
+ENVTEST_VERSION ?= release-0.19
+GOLANGCI_LINT_VERSION ?= v2.5.0
+HELM_VERSION ?= v3.19.0
+HELMIFY_VERSION ?= v0.4.19
+KIND_VERSION ?= v0.30.0
+
+PROMETHEUS_OPERATOR_VERSION ?= v0.72.0
+PO_BUNDLE_URL := https://github.com/prometheus-operator/prometheus-operator/releases/download/$(PROMETHEUS_OPERATOR_VERSION)/bundle.yaml
+CERTMANAGER_VERSION ?= v1.14.4
+CM_URL := https://github.com/jetstack/cert-manager/releases/download/$(CERTMANAGER_VERSION)/cert-manager.yaml
+GATEWAY_VERSION ?= v1.3.0
+
+GO_TOOLCHAIN ?= go1.25.0
+
+.PHONY: kustomize
+kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
+$(KUSTOMIZE): $(LOCALBIN)
+	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+
+.PHONY: controller-gen
+controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
+$(CONTROLLER_GEN): $(LOCALBIN)
+	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+
+.PHONY: envtest
+envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
+$(ENVTEST): $(LOCALBIN)
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+.PHONY: golangci-lint
+golangci-lint: ## Download golangci-lint locally if necessary.
+	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) with Go 1.25..."
+	GOTOOLCHAIN=go1.25.0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	mkdir -p $(LOCALBIN)
+	mv $$(go env GOPATH)/bin/golangci-lint $(LOCALBIN)/golangci-lint
+
+.PHONY: helmify helmify-bin
+helmify: manifests kustomize download-helm-mk helmify-bin ## Generate Helm chart from Kustomize manifests
+	@echo "Generating Helm chart..."
+	PATH="$(LOCALBIN):$$PATH" $(MAKE) -f $(HELM_MK) helmify \
+		KUSTOMIZE=$(KUSTOMIZE) \
+		HELM_CHART_NAME=$(HELM_CHART_NAME) \
+		HELMIFY_ARGS="-original-name" \
+		HELMIFY_POSTPROCESS=./hack/helm-overrides/apply.sh \
+		IMG=$(IMG)
+
+helmify-bin: $(HELMIFY)
+$(HELMIFY): $(LOCALBIN)
+	$(call go-install-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify,$(HELMIFY_VERSION))
+
+.PHONY: helm
+helm: $(HELM)
+$(HELM): $(LOCALBIN)
+ifeq ("$(wildcard $(HELM))","$(LOCALBIN)/helm")
+	@echo "Downloading helm $(HELM_VERSION)" ;\
+		curl -sSLO https://get.helm.sh/helm-$(HELM_VERSION)-linux-amd64.tar.gz ;\
+		tar -zxvf helm-$(HELM_VERSION)-linux-amd64.tar.gz ;\
+		mv linux-amd64/helm $(HELM) ;\
+		rm -rf linux-amd64 helm-$(HELM_VERSION)-linux-amd64.tar.gz ;\
+		chmod +x $(HELM) ;
+endif
+
+#.PHONY: tenant-crd-install
+#tenant-crd-install:
+#	@echo "Installing Tenant CRD"
+#	$(KUBECTL) apply -f hack/e2e/tenant-crd.yaml
+#	$(KUBECTL) wait --for=condition=Established crd/tenants.tenantoperator.stakater.com --timeout=60s
+
+.PHONY: install-prometheus-operator
+install-prometheus-operator:
+	@echo "Installing/ensuring Prometheus Operator (server-side apply)…"
+	$(KUBECTL) apply --server-side --field-manager=po-installer -f $(PO_BUNDLE_URL)
+	# Wait for CRDs to be established so subsequent resources don’t race
+	$(KUBECTL) wait --for=condition=Established --timeout=120s \
+	  crd/alertmanagerconfigs.monitoring.coreos.com \
+	  crd/alertmanagers.monitoring.coreos.com \
+	  crd/podmonitors.monitoring.coreos.com \
+	  crd/probes.monitoring.coreos.com \
+	  crd/prometheusagents.monitoring.coreos.com \
+	  crd/prometheuses.monitoring.coreos.com \
+	  crd/prometheusrules.monitoring.coreos.com \
+	  crd/servicemonitors.monitoring.coreos.com \
+	  crd/thanosrulers.monitoring.coreos.com
+	@echo "Prometheus Operator ensured."
+
+.PHONY: uninstall-prometheus-operator
+uninstall-prometheus-operator:
+	@echo "Uninstalling Prometheus Operator..."
+	-$(call k8s-tool,delete,prometheus-operator/prometheus-operator,$(PROMETHEUS_OPERATOR_VERSION),bundle.yaml)
+	@echo "Prometheus Operator uninstall completed"
+
+.PHONY: install-certmanager
+install-certmanager:
+	@echo "Installing/ensuring cert-manager (server-side apply)…"
+	$(KUBECTL) apply --server-side --force-conflicts --field-manager=cm-installer --validate=false -f $(CM_URL)
+	$(KUBECTL) wait --for=condition=Established --timeout=180s \
+	  crd/certificates.cert-manager.io crd/certificaterequests.cert-manager.io \
+	  crd/issuers.cert-manager.io crd/clusterissuers.cert-manager.io \
+	  crd/challenges.acme.cert-manager.io crd/orders.acme.cert-manager.io
+	$(KUBECTL) -n cert-manager rollout status deploy/cert-manager-webhook --timeout=300s || true
+	@echo "cert-manager ensured."
+
+.PHONY: uninstall-certmanager
+uninstall-certmanager:
+	@echo "Uninstalling Cert Manager..."
+	-$(call k8s-tool,delete,jetstack/cert-manager,$(CERTMANAGER_VERSION),cert-manager.yaml)
+	@echo "Cert Manager uninstall completed"
+
+.PHONY: install-gateway
+install-gateway:
+	$(call k8s-tool,create,kubernetes-sigs/gateway-api,$(GATEWAY_VERSION),standard-install.yaml)
+
+.PHONY: uninstall-gateway
+uninstall-gateway:
+	$(call k8s-tool,delete,kubernetes-sigs/gateway-api,$(GATEWAY_VERSION),standard-install.yaml)
+
+ifndef CI
+KUBECTL_OUTPUT_REDIRECT = > /dev/null
+else
+KUBECTL_OUTPUT_REDIRECT = 
+endif
+
+# k8s-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - action taken (create/apply/replace/delete)
+# $2 - Github org/repo of package which can be installed
+# $3 - specific version of package
+# $4 - file to be applied
+define k8s-tool
+{ \
+set -e; \
+package=https://github.com/$(2)/releases/download/$(3)/$(4) ;\
+if [ "$(1)" = "delete" ]; then \
+	$(info Running: $(KUBECTL) delete --ignore-not-found=true -f $${package}) \
+	$(KUBECTL) delete --ignore-not-found=true -f $${package} $(KUBECTL_OUTPUT_REDIRECT) ;\
+else \
+	$(info Running: $(KUBECTL) $(1) -f $${package}) \
+	$(KUBECTL) $(1) -f $${package} $(KUBECTL_OUTPUT_REDIRECT) ;\
+fi \
+}
+endef
+
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f "$(1)-$(3)" ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+rm -f $(1) || true ;\
+GOBIN=$(LOCALBIN) go install $${package} ;\
+mv $(1) $(1)-$(3) ;\
+} ;\
+ln -sf $(1)-$(3) $(1)
+endef
+
+.PHONY: operator-sdk
+OPERATOR_SDK ?= $(LOCALBIN)/operator-sdk
+operator-sdk: ## Download operator-sdk locally if necessary.
+ifeq (,$(wildcard $(OPERATOR_SDK)))
+ifeq (, $(shell which operator-sdk 2>/dev/null))
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(OPERATOR_SDK)) ;\
+	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+	curl -sSLo $(OPERATOR_SDK) https://github.com/operator-framework/operator-sdk/releases/download/$(OPERATOR_SDK_VERSION)/operator-sdk_$${OS}_$${ARCH} ;\
+	chmod +x $(OPERATOR_SDK) ;\
+	}
+else
+OPERATOR_SDK = $(shell which operator-sdk)
+endif
+endif
+
+.PHONY: bundle
+bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
+	$(OPERATOR_SDK) generate kustomize manifests -q
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
+	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
+	$(OPERATOR_SDK) bundle validate ./bundle
+
+.PHONY: bundle-build
+bundle-build: ## Build the bundle image.
+	docker build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
+
+.PHONY: bundle-push
+bundle-push: ## Push the bundle image.
+	$(MAKE) docker-push IMG=$(BUNDLE_IMG)
+
+.PHONY: opm
+OPM = $(LOCALBIN)/opm
+opm: ## Download opm locally if necessary.
+ifeq (,$(wildcard $(OPM)))
+ifeq (,$(shell which opm 2>/dev/null))
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(OPM)) ;\
+	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+	curl -sSLo $(OPM) https://github.com/operator-framework/operator-registry/releases/download/v1.23.0/$${OS}-$${ARCH}-opm ;\
+	chmod +x $(OPM) ;\
+	}
+else
+OPM = $(shell which opm)
+endif
+endif
+
+.PHONY: yq
+YQ_VERSION := v4.13.0
+YQ_BIN := $(LOCALBIN)/yq
+yq:
+ifeq (,$(wildcard $(YQ_BIN)))
+ifeq (,$(shell which yq 2>/dev/null))
+	@{ \
+	set -e ;\
+	mkdir -p $(dir $(YQ_BIN)) ;\
+	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+	curl -sSLo $(YQ_BIN) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$${OS}-$${ARCH} ;\
+	chmod +x $(YQ_BIN) ;\
+	}
+else
+YQ_BIN = $(shell which yq)
+endif
+endif
+
+# A comma-separated list of bundle images (e.g. make catalog-build BUNDLE_IMGS=example.com/operator-bundle:v0.1.0,example.com/operator-bundle:v0.2.0).
+# These images MUST exist in a registry and be pull-able.
+BUNDLE_IMGS ?= $(BUNDLE_IMG)
+
+# The image tag given to the resulting catalog image (e.g. make catalog-build CATALOG_IMG=example.com/operator-catalog:v0.2.0).
+CATALOG_IMG ?= $(IMAGE_TAG_BASE)-catalog:v$(VERSION)$(GIT_TAG)
+
+# Set CATALOG_BASE_IMG to an existing catalog image tag to add $BUNDLE_IMGS to that image.
+ifneq ($(origin CATALOG_BASE_IMG), undefined)
+FROM_INDEX_OPT := --from-index $(CATALOG_BASE_IMG)
+endif
+
+# Render bundle to the catalog index.
+.PHONY: catalog-render
+catalog-render: opm yq ## Render bundle to catalog index.
+	bash generate-catalog-index.sh $(DOCKER_REPO_BASE) $(OPERATOR_NAME) $(CATALOG_DIR_PATH) $(VERSION) $(GIT_TAG)
+
+# Build a catalog image by adding bundle images to an empty catalog using the operator package manager tool, 'opm'.
+# This recipe invokes 'opm' in 'semver' bundle add mode. For more information on add modes, see:
+# https://github.com/operator-framework/community-operators/blob/7f1438c/docs/packaging-operator.md#updating-your-existing-operator
+.PHONY: catalog-build
+catalog-build: opm ## Build a catalog image.
+	$(OPM) index add --container-tool docker --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
+
+# Push the catalog image.
+.PHONY: catalog-push
+catalog-push: ## Push a catalog image.
+	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+# Push the catalog image.
+.PHONY: publish
+publish: ## Build and publish operator.
+	echo $(BUNDLE_IMGS)
+	$(MAKE) manifests build docker-build docker-push
+	rm -f bin/kustomize
+	$(MAKE) bundle bundle-build bundle-push
+	$(MAKE) catalog-render catalog-build catalog-push
