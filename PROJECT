@@ -8,6 +8,6 @@ layout:
 plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
-projectName: mto-extension-grafana
-repo: github.com/stakater-ab/mto-extension-grafana
+projectName: ${OPERATOR_NAME}
+repo: ${REPOSITORY}
 version: "3"

@@ -1,0 +1,42 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: '[]'
+    capabilities: Basic Install
+  name: ${OPERATOR_NAME}.v0.0.0
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions: {}
+  description: ${OPERATOR_NAME}
+  displayName: ${OPERATOR_NAME}
+  icon:
+  - base64data: ""
+    mediatype: ""
+  install:
+    spec:
+      deployments: null
+    strategy: ""
+  installModes:
+  - supported: false
+    type: OwnNamespace
+  - supported: false
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - openshift
+  links:
+  - name: ${OPERATOR_NAME}
+    url: https://${OPERATOR_NAME}.domain
+  maintainers:
+  - email: support@stakater.com
+    name: Stakater
+  maturity: alpha
+  provider:
+    name: Stakater
+    url: https://stakater.com
+  version: 0.0.0

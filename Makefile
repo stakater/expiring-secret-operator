@@ -4,12 +4,12 @@
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
 VERSION ?= 0.0.1
-OPERATOR_NAME ?= grafana-extension
+OPERATOR_NAME ?= ${OPERATOR_NAME}
 CATALOG_DIR_PATH ?= catalog
 DOCKER_REPO_BASE ?= ghcr.io/stakater
-PROJECT_NAME ?= telemetry.tenantoperator.stakater.com
+PROJECT_NAME ?= ${PROJECT_NAME}
 
-TEST_NAMESPACE ?= grafana-extension-system
+TEST_NAMESPACE ?= $(OPERATOR_NAME)-system
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -34,7 +34,7 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 # This variable is used to construct full image tags for bundle and catalog images.
 #
 # For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
-# telemetry.tenantoperator.stakater.com/grafana-tenant-extension-bundle:$VERSION and telemetry.tenantoperator.stakater.com/grafana-tenant-extension-catalog:$VERSION.
+# $(PROJECT_NAME)/$(OPERATOR_NAME)-bundle:$VERSION and $(PROJECT_NAME)/$(OPERATOR_NAME)-catalog:$VERSION.
 IMAGE_TAG_BASE ?= $(DOCKER_REPO_BASE)/$(OPERATOR_NAME)
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
@@ -188,7 +188,6 @@ post-e2e-test: uninstall-certmanager uninstall-prometheus-operator
 	## Make sure to undeploy before uninstalling CRDs
 
 .PHONY: install-dependencies
-#install-dependencies: tenant-crd-install install-prometheus-operator install-certmanager install-grafana-operator install-grafana-instance
 install-dependencies: install-prometheus-operator install-certmanager
 
 .PHONY: lint
@@ -201,10 +200,10 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 ##@ Helm
 
-HELM_CHART_DIR ?= charts/mto-extension-grafana
+HELM_CHART_DIR ?= charts/$(OPERATOR_NAME)
 HELM_VERSION ?= $(VERSION)$(GIT_TAG)
 HELM_REGISTRY ?= ghcr.io/stakater/charts
-HELM_CHART_NAME ?= mto-extension-grafana
+HELM_CHART_NAME ?= $(OPERATOR_NAME)
 HELM_MK_URL ?= https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/makefiles/helm.mk
 HELM_MK := makefiles/helm.mk
 
@@ -276,12 +275,12 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	tmp="$$(mktemp -t Dockerfile.cross.XXXXXX)"; \
 	awk 'BEGIN{done=0} !done && $$1=="FROM"{ sub(/^FROM/,"FROM --platform=\\$${BUILDPLATFORM}"); done=1 } {print}' Dockerfile > "$$tmp"; \
 	# ensure the builder exists (idempotent)
-	if ! $(CONTAINER_TOOL) buildx inspect mto-extension-grafana-builder >/dev/null 2>&1; then \
-	  $(CONTAINER_TOOL) buildx create --name mto-extension-grafana-builder --driver docker-container >/dev/null; \
+	if ! $(CONTAINER_TOOL) buildx inspect $(PROJECT_NAME)-builder >/dev/null 2>&1; then \
+	  $(CONTAINER_TOOL) buildx create --name $(PROJECT_NAME)-builder --driver docker-container >/dev/null; \
 	fi; \
-	# build using that builder (don’t mutate global builder state)
+	# build using that builder (don't mutate global builder state)
 	$(CONTAINER_TOOL) buildx build \
-	  --builder mto-extension-grafana-builder \
+	  --builder $(PROJECT_NAME)-builder \
 	  --push \
 	  --platform="$(PLATFORMS)" \
 	  --tag "$(IMG)" \

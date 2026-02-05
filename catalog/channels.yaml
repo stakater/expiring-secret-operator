@@ -1,5 +1,5 @@
 schema: olm.channel
-package: mto-extension-grafana
+package: ${PROJECT_NAME}
 name: preview
 entries:
-  - name: mto-extension-grafana.v0.0.1
+  - name: ${OPERATOR_NAME}.v0.0.1
