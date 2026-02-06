@@ -1,11 +1,40 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  labels:
-    app.kubernetes.io/name: expiring-secrets
-    app.kubernetes.io/managed-by: kustomize
   name: manager-role
 rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - expiringsecret.stakater.com
+  resources:
+  - monitors
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - expiringsecret.stakater.com
+  resources:
+  - monitors/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - expiringsecret.stakater.com
+  resources:
+  - monitors/status
+  verbs:
+  - get
+  - patch
+  - update

@@ -100,6 +100,12 @@ all: build
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+# Hitta namnet på denna makefil
+MY_NAME := $(lastword $(MAKEFILE_LIST))
+
+all:
+	@echo "Denna makefil heter: $(MY_NAME)"
+
 ##@ Development
 
 .PHONY: manifests
@@ -137,9 +143,10 @@ endif
 
 PKGS     := $(shell go list ./... | grep -v /e2e)
 COVDATA  := $(shell go tool -n covdata 2>/dev/null)
+DEPENDENCIES := prometheus-operator certmanager
 
 .PHONY: test
-test: manifests generate fmt vet envtest
+test: manifests generate fmt vet envtest ## Run tests with the Go testing framework. Call with LABEL=<ginkgo-label> to filter tests by ginkgo label, and with VERBOSE=true or VERY_VERBOSE=true to increase verbosity of test output. Call with QUIET=true to suppress test output.
 ifdef COVDATA
 	# Full coverage path (works when covdata exists)
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
@@ -151,8 +158,8 @@ else
 endif
 
 # Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
-.PHONY: test-e2e  # Run e2e tests with guaranteed cleanup even on failure
-test-e2e:
+.PHONY: test-e2e
+test-e2e: ## Run e2e tests with guaranteed cleanup even on failure
 	@{ \
 		$(MAKE) pre-e2e-test && \
 		$(MAKE) run-e2e-test; \
@@ -162,33 +169,12 @@ test-e2e:
 		exit $$exit_code; \
 	}
 
+
+# Run e2e tests.
+# This is separated from test-e2e to ensure cleanup happens even if tests fail.
 .PHONY: run-e2e-test
 run-e2e-test:
 	go test ./test/e2e/ $(TEST_ARGS)
-
-.PHONY: pre-e2e-test
-#pre-e2e-test: kind kustomize install-prometheus-operator install-certmanager install-gateway docker-build
-pre-e2e-test: kind kustomize install-prometheus-operator install-certmanager docker-build load-image-to-kind
-	@echo "Loading docker image into kind cluster..."
-	$(KIND) load docker-image $(IMG) --name $(TEST_CLUSTER_NAME)
-	@echo "Installing CRDs and deploying operator..."
-	$(MAKE) install
-	$(MAKE) deploy
-
-#	kubectl get pods -l control-plane=controller-manager \
-#		-o go-template="{{ range .items }}{{ if not .metadata.deletionTimestamp }}{{ .metadata.name }}{{ \"\\n\" }}{{ end }}{{ end }}" \
-#		-n $(TEST_NAMESPACE)
-
-#	# controller-manager
-#	kubectl get pods controllerPodName -o jsonpath={.status.phase} -n $(TEST_NAMESPACE)
-
-.PHONY: post-e2e-test
-#post-e2e-test: uninstall-gateway uninstall-certmanager uninstall-prometheus-operator
-post-e2e-test: uninstall-certmanager uninstall-prometheus-operator
-	## Make sure to undeploy before uninstalling CRDs
-
-.PHONY: install-dependencies
-install-dependencies: install-prometheus-operator install-certmanager
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -197,6 +183,38 @@ lint: golangci-lint ## Run golangci-lint linter
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	$(GOLANGCI_LINT) run --fix
+
+## Internal targets for installing/uninstalling dependencies for e2e tests.
+## These can be called individually if needed.
+
+# Setup dependencies and deploy operator before e2e tests.
+# Call with ignore-not-found=true to ignore resource not found errors during deletion.
+.PHONY: pre-e2e-test
+pre-e2e-test: kind kustomize install-dependencies docker-build load-image-to-kind
+	@echo "Loading docker image into kind cluster..."
+	$(KIND) load docker-image $(IMG) --name $(TEST_CLUSTER_NAME)
+	@echo "Installing CRDs and deploying operator..."
+	$(MAKE) install
+	$(MAKE) deploy
+#	kubectl get pods -l control-plane=controller-manager \
+#		-o go-template="{{ range .items }}{{ if not .metadata.deletionTimestamp }}{{ .metadata.name }}{{ \"\\n\" }}{{ end }}{{ end }}" \
+#		-n $(TEST_NAMESPACE)
+#	# controller-manager
+#	kubectl get pods controllerPodName -o jsonpath={.status.phase} -n $(TEST_NAMESPACE)
+
+# Uninstall dependencies and undeploy operator after e2e tests.
+# Call with ignore-not-found=true to ignore resource not found errors during deletion.
+.PHONY: post-e2e-test
+post-e2e-test: uninstall-dependencies
+	## Make sure to undeploy before uninstalling CRDs
+
+# Install dependencies for e2e tests
+.PHONY: install-dependencies
+install-dependencies: $(foreach var,$(DEPENDENCIES),install-$(var))
+
+# Uninstall dependencies for e2e tests
+.PHONY: uninstall-dependencies
+uninstall-dependencies: $(foreach var,$(DEPENDENCIES),uninstall-$(var))
 
 ##@ Helm
 
@@ -216,7 +234,7 @@ define download-file
 		curl -H 'Cache-Control: no-cache' -fsSL $(CURL_OPTS) "$(1)" -o "$(2)" || { echo "Failed to download $(1)"; exit 1; }; \
 	fi
 endef
-	   
+
 .PHONY: download-helm-mk
 download-helm-mk: ## Download remote makefile into makefiles/helm.mk (only if missing)
 	$(call download-file,$(HELM_MK_URL),$(HELM_MK))
