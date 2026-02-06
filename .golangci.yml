@@ -31,24 +31,20 @@ linters:
           - dupl
           - lll
         path: internal/*
+      # Allow dot-imports in these specific helper files
+      - path: '(^|.*/)[test|internal]/utils/[utils|shared]\.go$'
+        linters:
+          - staticcheck
+        text: '^ST1001: should not use dot imports'
+      # Also allow in any *_test.go file
+      - path: '.*_test\.go$'
+        linters:
+          - staticcheck
+        text: '^ST1001: should not use dot imports'
     paths:
       - third_party$
       - builtin$
       - examples$
-
-issues:
-  exclude-rules:
-    # Allow dot-imports in these specific helper files
-    - path: '(^|.*/)internal/utils/shared\.go$'
-      text: '^ST1001: should not use dot imports'
-    - path: '(^|.*/)internal/utils/utils\.go$'
-      text: '^ST1001: should not use dot imports'
-    - path: '(^|.*/)test/utils/utils\.go$'
-      text: '^ST1001: should not use dot imports'
-
-    # Also allow in any *_test.go file
-    - path: '.*_test\.go$'
-      text: '^ST1001: should not use dot imports'
 
 formatters:
   enable:
