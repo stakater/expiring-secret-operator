@@ -13,10 +13,10 @@ For local development and testing, you can build and push the operator image dir
 3. Add a version entry to `catalog/channels.yaml` following OLM upgrade specifications:
    ```yaml
    entries:
-   - name: ${OPERATOR_NAME}.v0.0.1
-   - name: ${OPERATOR_NAME}.v0.0.2 # This is the next version to be released
+   - name: expiring-secrets.v0.0.1
+   - name: expiring-secrets.v0.0.2 # This is the next version to be released
      skips:
-      - ${OPERATOR_NAME}.v0.0.1
+      - expiring-secrets.v0.0.1
       ```
 4. Render, build, and push the catalog index:
    ```sh
@@ -33,10 +33,10 @@ A catalog release is triggered if:
 - A new version entry is specified in `catalog/channels.yaml,` indicating the upcoming release.
   ```yaml
   entries:
-  - name: ${OPERATOR_NAME}.v0.0.1
-  - name: ${OPERATOR_NAME}.v0.0.2 # This is the next version to be released
+  - name: expiring-secrets.v0.0.1
+  - name: expiring-secrets.v0.0.2 # This is the next version to be released
     skips:
-    - ${OPERATOR_NAME}.v0.0.1
+    - expiring-secrets.v0.0.1
   ```
 
 ## Working with Entries in `catalog/channels.yaml`
@@ -61,10 +61,10 @@ Example:
 
 ```yaml
 entries:
-- name: ${OPERATOR_NAME}.v0.0.3
+- name: expiring-secrets.v0.0.3
   skips:
-   - ${OPERATOR_NAME}.v0.0.1
-   - ${OPERATOR_NAME}.v0.0.2
+   - expiring-secrets.v0.0.1
+   - expiring-secrets.v0.0.2
 ```
 #### Breaking API Changes (Use replaces)
 For breaking API changes, the replaces field is used to specify which previous version is being replaced. This indicates to OLM that the older version should be upgraded to the new version.
@@ -72,18 +72,18 @@ Example:
 
 ```yaml
 entries:
-- name: ${OPERATOR_NAME}.v0.0.3
-  replaces: ${OPERATOR_NAME}.v0.0.1
+- name: expiring-secrets.v0.0.3
+  replaces: expiring-secrets.v0.0.1
 ```
 
 ## Contributing
 1. Add the next version entry in `catalog/channels.yaml`:
    ```yaml
    entries:
-      - name: ${OPERATOR_NAME}.v{{CURRENT}}
-      - name: ${OPERATOR_NAME}.v{{NEXT}}
+      - name: expiring-secrets.v{{CURRENT}}
+      - name: expiring-secrets.v{{NEXT}}
         skips:
-          - ${OPERATOR_NAME}.v0.0.1
+          - expiring-secrets.v0.0.1
    ```
 2. Create a PR and run tests.
 3. Merging the PR will trigger the build and push the releases.

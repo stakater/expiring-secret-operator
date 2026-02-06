@@ -8,6 +8,6 @@ layout:
 plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
-projectName: ${OPERATOR_NAME}
-repo: ${REPOSITORY}
+projectName: expiring-secrets
+repo: github.com/stakater/expiring-secrets
 version: "3"

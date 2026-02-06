@@ -1,4 +1,4 @@
-module github.com/stakater-ab/mto-extension-grafana
+module github.com/stakater/expiring-secrets
 
 go 1.22.0
 

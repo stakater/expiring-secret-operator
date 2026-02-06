@@ -1,6 +1,6 @@
 # Workflow 
 
-This repository uses shared workflows [`operator_pull_request.yaml`](https://github.com/stakater/.github/blob/main/.github/workflows/operator_pull_request.yaml) and [`operator_push.yaml`](https://github.com/stakater/.github/blob/main/.github/workflows/operator_pull_request.yaml) available in [`stakater/.github`](https://github.com/stakater/.github). These workflows are shared between [IPShield](https://github.com/stakater/IPShield), [UptimeGuardian](https://github.com/stakater/UptimeGuardian), and [${OPERATOR_NAME}](#)
+This repository uses shared workflows [`operator_pull_request.yaml`](https://github.com/stakater/.github/blob/main/.github/workflows/operator_pull_request.yaml) and [`operator_push.yaml`](https://github.com/stakater/.github/blob/main/.github/workflows/operator_pull_request.yaml) available in [`stakater/.github`](https://github.com/stakater/.github). These workflows are shared between [IPShield](https://github.com/stakater/IPShield), [UptimeGuardian](https://github.com/stakater/UptimeGuardian), and [expiring-secrets](#)
 
 ## Steps
 

@@ -4,10 +4,10 @@
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
 VERSION ?= 0.0.1
-OPERATOR_NAME ?= ${OPERATOR_NAME}
+OPERATOR_NAME ?= expiring-secrets
 CATALOG_DIR_PATH ?= catalog
 DOCKER_REPO_BASE ?= ghcr.io/stakater
-PROJECT_NAME ?= ${PROJECT_NAME}
+PROJECT_NAME ?= expiring-secrets.stakater.com
 
 TEST_NAMESPACE ?= $(OPERATOR_NAME)-system
 

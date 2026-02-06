@@ -2,7 +2,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   labels:
-    app.kubernetes.io/name: ${OPERATOR_NAME}
+    app.kubernetes.io/name: expiring-secrets
     app.kubernetes.io/managed-by: kustomize
   name: manager-rolebinding
 roleRef:

@@ -1,5 +1,5 @@
 schema: olm.channel
-package: ${PROJECT_NAME}
+package: expiring-secrets.stakater.com
 name: preview
 entries:
-  - name: ${OPERATOR_NAME}.v0.0.1
+  - name: expiring-secrets.v0.0.1

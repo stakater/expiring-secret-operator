@@ -17,11 +17,11 @@ echo " catalog build start"
 SHOULD_RELEASE="false"
 for item in $CHANNEL_BUNDLES; do
   # Setup bundle from entries
-  latest="${OPERATOR_NAME}.v${VERSION}"
+  latest="expiring-secrets.v${VERSION}"
   if [ -n "$GIT_TAG" ] && [ "$latest" == "$item" ]; then
-      bundle="${item//${OPERATOR_NAME}./${OPERATOR_NAME}-bundle:}${GIT_TAG}"
+      bundle="${item//expiring-secrets./expiring-secrets-bundle:}${GIT_TAG}"
   else
-      bundle="${item//${OPERATOR_NAME}./${OPERATOR_NAME}-bundle:}"
+      bundle="${item//expiring-secrets./expiring-secrets-bundle:}"
   fi
 
   # Check if next release is defined in any channel

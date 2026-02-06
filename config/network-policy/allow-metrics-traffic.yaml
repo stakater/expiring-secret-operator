@@ -5,7 +5,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   labels:
-    app.kubernetes.io/name: ${OPERATOR_NAME}
+    app.kubernetes.io/name: expiring-secrets
     app.kubernetes.io/managed-by: kustomize
   name: allow-metrics-traffic
   namespace: system
