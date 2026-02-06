@@ -7,6 +7,7 @@ A Kubernetes operator that monitors expiring credentials in Secrets and provides
 Many organizations use Personal Access Tokens (PATs), API keys, and other credentials that have expiration dates. When these expire without notice, it can lead to CI/CD pipeline failures, deployment issues, and downtime.
 
 This operator watches Kubernetes Secrets containing expiring credentials and:
+
 - ✅ Exposes **Prometheus metrics** for monitoring expiration times
 - 📊 Updates **CR status** with human-readable state information  
 - 🚨 Supports **configurable alert thresholds** (Info, Warning, Critical)
@@ -82,7 +83,7 @@ secretmonitor_reconcile_total{monitor="docker-registry-monitor",namespace="defau
 ## Alert States
 
 | State | Description | Default Threshold |
-|-------|-------------|-------------------|
+| ----- | ----------- | ----------------- |
 | **Valid** | Secret is healthy and far from expiration | > 30 days |
 | **Info** | Secret approaching expiration but not urgent | 14-30 days |
 | **Warning** | Secret needs attention soon | 7-14 days |
@@ -144,16 +145,35 @@ make fmt vet
 
 ## Architecture
 
-```
-Monitor CR
-   ↓
-Reconciler watches Secret
-   ↓
-Parses expiringsecret.stakater.com/validUntil label
-   ↓
-Exposes Prometheus metrics + Updates status
-   ↓
-ServiceMonitor → Prometheus → Alertmanager
+```mermaid
+graph TD
+    SECRET@{ shape: doc, label: "Secret"}
+
+    subgraph MCR[Monitor CR]
+      direction TD
+      MCRRW[Reconciler]
+      MCRPAR[Parse label]
+
+      MCRSTATUS[\Status\]
+      MCRMETRIC[\Metrics\]
+
+      MCRINPUT[\Input\]
+
+      MCRRW --> MCRPAR
+      MCRRW <-- Watches --> MCRINPUT
+      MCRPAR -->|Update| MCRSTATUS
+      MCRPAR -->|Expose| MCRMETRIC
+    end
+
+    SECRET --> MCRINPUT
+
+    SM[[ServiceMonitor]]
+    PROM[[Prometheus]]
+    AM[[Alertmanager]]
+
+    MCRMETRIC --> SM
+
+    SM --> PROM --> AM
 ```
 
 ## Requirements
