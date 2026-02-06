@@ -22,7 +22,7 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the expiring-secrets itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
-- memcached_admin_role.yaml
-- memcached_editor_role.yaml
-- memcached_viewer_role.yaml
+- monitor_admin_role.yaml
+- monitor_editor_role.yaml
+- monitor_viewer_role.yaml
 

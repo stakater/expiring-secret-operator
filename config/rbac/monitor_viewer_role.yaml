@@ -1,7 +1,7 @@
 # This rule is not used by the project expiring-secrets itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants read-only access to cache.stakater.cloud resources.
+# Grants read-only access to expiringsecrets.stakater.com resources.
 # This role is intended for users who need visibility into these resources
 # without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
 

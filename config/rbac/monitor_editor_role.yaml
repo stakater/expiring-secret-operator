@@ -1,7 +1,7 @@
 # This rule is not used by the project expiring-secrets itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants permissions to create, update, and delete resources within the cache.stakater.cloud.
+# Grants permissions to create, update, and delete resources within the expiringsecrets.stakater.com.
 # This role is intended for users who need to manage these resources
 # but should not control RBAC or manage permissions for others.
 

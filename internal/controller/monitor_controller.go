@@ -33,9 +33,9 @@ type MonitorReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=cache.stakater.cloud,resources=memcacheds,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=cache.stakater.cloud,resources=memcacheds/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=cache.stakater.cloud,resources=memcacheds/finalizers,verbs=update
+// +kubebuilder:rbac:groups=expiringsecrets.stakater.com,resources=monitors,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=expiringsecrets.stakater.com,resources=monitors/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=expiringsecrets.stakater.com,resources=monitors/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
