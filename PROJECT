@@ -16,8 +16,8 @@ resources:
     namespaced: true
   controller: true
   domain: stakater.com
-  group: cache
-  kind: Memcached
+  group: expiringsecret
+  kind: Monitor
   path: github.com/stakater/expiring-secrets/api/v1alpha1
   version: v1alpha1
 version: "3"

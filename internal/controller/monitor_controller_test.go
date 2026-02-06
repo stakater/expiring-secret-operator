@@ -368,4 +368,72 @@ var _ = Describe("Monitor Controller", func() {
 		})
 	})
 
+	Context("When testing state calculation logic", func() {
+		var reconciler *MonitorReconciler
+
+		BeforeEach(func() {
+			reconciler = &MonitorReconciler{}
+		})
+
+		It("should calculate Valid state correctly", func() {
+			monitor := &expiringsecretv1alpha1.Monitor{
+				Spec: expiringsecretv1alpha1.MonitorSpec{
+					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{
+						CriticalDays: 7,
+						WarningDays:  14,
+					},
+				},
+			}
+			// 30 days remaining
+			secondsRemaining := float64(30 * 24 * 60 * 60)
+			state := reconciler.calculateState(monitor, secondsRemaining)
+			Expect(state).To(Equal("Valid"))
+		})
+
+		It("should calculate Warning state correctly", func() {
+			monitor := &expiringsecretv1alpha1.Monitor{
+				Spec: expiringsecretv1alpha1.MonitorSpec{
+					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{
+						CriticalDays: 7,
+						WarningDays:  14,
+					},
+				},
+			}
+			// 10 days remaining (between 7 and 14)
+			secondsRemaining := float64(10 * 24 * 60 * 60)
+			state := reconciler.calculateState(monitor, secondsRemaining)
+			Expect(state).To(Equal("Warning"))
+		})
+
+		It("should calculate Critical state correctly", func() {
+			monitor := &expiringsecretv1alpha1.Monitor{
+				Spec: expiringsecretv1alpha1.MonitorSpec{
+					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{
+						CriticalDays: 7,
+						WarningDays:  14,
+					},
+				},
+			}
+			// 3 days remaining (less than 7)
+			secondsRemaining := float64(3 * 24 * 60 * 60)
+			state := reconciler.calculateState(monitor, secondsRemaining)
+			Expect(state).To(Equal("Critical"))
+		})
+
+		It("should calculate Expired state correctly", func() {
+			monitor := &expiringsecretv1alpha1.Monitor{}
+			// -5 days (expired 5 days ago)
+			secondsRemaining := float64(-5 * 24 * 60 * 60)
+			state := reconciler.calculateState(monitor, secondsRemaining)
+			Expect(state).To(Equal("Expired"))
+		})
+
+		It("should use default thresholds when not specified", func() {
+			monitor := &expiringsecretv1alpha1.Monitor{}
+			// 10 days remaining (should be Warning with default 14-day threshold)
+			secondsRemaining := float64(10 * 24 * 60 * 60)
+			state := reconciler.calculateState(monitor, secondsRemaining)
+			Expect(state).To(Equal("Warning"))
+		})
+	})
 })

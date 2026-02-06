@@ -5,7 +5,15 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - expiringsecrets.stakater.com
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - expiringsecret.stakater.com
   resources:
   - monitors
   verbs:
@@ -17,13 +25,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - expiringsecrets.stakater.com
+  - expiringsecret.stakater.com
   resources:
   - monitors/finalizers
   verbs:
   - update
 - apiGroups:
-  - expiringsecrets.stakater.com
+  - expiringsecret.stakater.com
   resources:
   - monitors/status
   verbs:

@@ -47,7 +47,7 @@ kind: Monitor
 metadata:
   name: docker-registry-monitor
 spec:
-  registry: docker.io
+  service: docker.io
   secretRef:
     name: docker-registry-token
     namespace: default
