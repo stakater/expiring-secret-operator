@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- expiringsecrets_v1alpha1_monitor.yaml
+- expiring-secrets_v1alpha1_monitor.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples

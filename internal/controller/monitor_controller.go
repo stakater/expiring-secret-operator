@@ -38,20 +38,28 @@ import (
 
 // Prometheus metrics
 var (
+	metricsLabels = []string{
+		"registry",
+		"monitor_name", "monitor_namespace",
+		"secret_name", "secret_namespace"}
 	secretValidUntilTimestamp = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "secretmonitor_valid_until_timestamp",
-			Help: "PAT expiration timestamp (unix)",
+			Namespace: "expiringsecret",
+			Subsystem: "monitor",
+			Name:      "valid_until_timestamp_seconds",
+			Help:      "Secret expiration timestamp",
 		},
-		[]string{"registry", "name", "namespace"},
+		metricsLabels,
 	)
 
 	secretSecondsUntilExpiry = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "secretmonitor_seconds_until_expiry",
-			Help: "Seconds until PAT expires",
+			Namespace: "expiringsecret",
+			Subsystem: "monitor",
+			Name:      "until_expiration_seconds",
+			Help:      "Seconds until secret expires",
 		},
-		[]string{"registry", "name", "namespace"},
+		metricsLabels,
 	)
 )
 
@@ -66,9 +74,11 @@ type MonitorReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=expiringsecret.stakater.com,resources=monitors,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=expiringsecret.stakater.com,resources=monitors/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=expiringsecret.stakater.com,resources=monitors/finalizers,verbs=update
+const LabelKey = "expiringsecret.stakater.com/validUntil"
+
+// +kubebuilder:rbac:groups=expiring-secrets.stakater.com,resources=monitors,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=expiring-secrets.stakater.com,resources=monitors/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=expiring-secrets.stakater.com,resources=monitors/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -82,11 +92,20 @@ func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Monitor was deleted, clean up metrics
-			r.cleanupMetrics(req.NamespacedName, "")
+			r.cleanupMetrics(ctx, req.NamespacedName, "")
 			logger.Info("Monitor deleted, cleaned up metrics")
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "Failed to get Monitor")
+		return ctrl.Result{}, err
+	}
+	if monitor.Spec.AlertThresholds == nil {
+		monitor.Spec.AlertThresholds = &expiringsecretv1alpha1.AlertThresholds{}
+	}
+	monitor.Spec.AlertThresholds.ApplyDefaults()
+	err = r.Update(ctx, monitor)
+	if err != nil {
+		logger.Error(err, "Failed to update Monitor with default AlertThresholds")
 		return ctrl.Result{}, err
 	}
 
@@ -105,18 +124,18 @@ func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	err = r.Get(ctx, secretKey, secret)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("Referenced secret not found", "secret", secretKey)
+			logger.Error(err, "Referenced secret not found", "secretName", secretKey.Name, "secretNamespace", secretKey.Namespace)
 			return r.updateStatus(ctx, monitor, expiringsecretv1alpha1.MonitorStateError, "Referenced secret not found", nil, nil)
 		}
-		logger.Error(err, "Failed to get referenced secret", "secret", secretKey)
+		logger.Error(err, "Failed to get referenced secret", "secretName", secretKey.Name, "secretNamespace", secretKey.Namespace)
 		return r.updateStatus(ctx, monitor, expiringsecretv1alpha1.MonitorStateError, "Failed to get referenced secret", nil, nil)
 	}
 
 	// Parse the expiration timestamp from the secret label
-	validUntilStr, exists := secret.Labels["expiringsecret.stakater.com/validUntil"]
+	validUntilStr, exists := secret.Labels[LabelKey]
 	if !exists {
-		msg := "Secret does not have expiringsecret.stakater.com/validUntil label"
-		logger.Info(msg, "secret", secretKey)
+		msg := fmt.Sprintf("Secret does not have %s label", LabelKey)
+		logger.Error(nil, msg, "secretName", secretKey.Name, "secretNamespace", secretKey.Namespace)
 		return r.updateStatus(ctx, monitor, expiringsecretv1alpha1.MonitorStateError, msg, nil, nil)
 	}
 
@@ -131,17 +150,19 @@ func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	now := time.Now()
 	secondsRemaining := validUntil.Sub(now).Seconds()
 
+	// Determine the current state based on thresholds
+	state := r.calculateState(monitor, secondsRemaining)
+
 	// Update Prometheus metrics
 	labels := prometheus.Labels{
-		"registry":  monitor.Spec.Service,
-		"name":      monitor.Name,
-		"namespace": monitor.Namespace,
+		"registry":          monitor.Spec.Service,
+		"monitor_name":      monitor.Name,
+		"monitor_namespace": monitor.Namespace,
+		"secret_name":       monitor.Spec.SecretRef.Name,
+		"secret_namespace":  monitor.Spec.SecretRef.Namespace,
 	}
 	secretValidUntilTimestamp.With(labels).Set(float64(validUntil.Unix()))
 	secretSecondsUntilExpiry.With(labels).Set(secondsRemaining)
-
-	// Determine the current state based on thresholds
-	state := r.calculateState(monitor, secondsRemaining)
 
 	// Update the Monitor status
 	expiresAt := metav1.NewTime(validUntil)
@@ -156,37 +177,58 @@ func (r *MonitorReconciler) calculateState(monitor *expiringsecretv1alpha1.Monit
 	}
 
 	daysRemaining := secondsRemaining / (24 * 60 * 60)
-
-	// Use default thresholds if not specified
-	infoDays := int32(30)
-	warningDays := int32(14)
-	criticalDays := int32(7)
-
-	if monitor.Spec.AlertThresholds != nil {
-		if monitor.Spec.AlertThresholds.InfoDays > 0 {
-			infoDays = monitor.Spec.AlertThresholds.InfoDays
-		}
-		if monitor.Spec.AlertThresholds.WarningDays > 0 {
-			warningDays = monitor.Spec.AlertThresholds.WarningDays
-		}
-		if monitor.Spec.AlertThresholds.CriticalDays > 0 {
-			criticalDays = monitor.Spec.AlertThresholds.CriticalDays
-		}
+	if monitor.Spec.AlertThresholds == nil {
+		monitor.Spec.AlertThresholds = &expiringsecretv1alpha1.AlertThresholds{}
 	}
+	monitor.Spec.AlertThresholds.ApplyDefaults()
 
-	if daysRemaining <= float64(criticalDays) {
+	if daysRemaining <= float64(monitor.Spec.AlertThresholds.CriticalDays) {
 		return expiringsecretv1alpha1.MonitorStateCritical
-	} else if daysRemaining <= float64(warningDays) {
+	} else if daysRemaining <= float64(monitor.Spec.AlertThresholds.WarningDays) {
 		return expiringsecretv1alpha1.MonitorStateWarning
-	} else if daysRemaining <= float64(infoDays) {
+	} else if daysRemaining <= float64(monitor.Spec.AlertThresholds.InfoDays) {
 		return expiringsecretv1alpha1.MonitorStateInfo
 	}
 
 	return expiringsecretv1alpha1.MonitorStateValid
 }
 
-// updateStatus updates the Monitor status with multiple possible parameters
-func (r *MonitorReconciler) updateStatus(ctx context.Context, monitor *expiringsecretv1alpha1.Monitor, state expiringsecretv1alpha1.MonitorState, message string, expiresAt *metav1.Time, secondsRemaining *int64) (ctrl.Result, error) {
+func (r *MonitorReconciler) getDefaultMessageForState(status expiringsecretv1alpha1.MonitorStatus, monitor *expiringsecretv1alpha1.Monitor) expiringsecretv1alpha1.MonitorStatus {
+	if status.Message != "" {
+		return status
+	}
+
+	message := ""
+	switch status.State {
+	case expiringsecretv1alpha1.MonitorStateValid:
+		message = fmt.Sprintf("Secret is valid until %s", status.ExpiresAt.Format("2006-01-02"))
+	case expiringsecretv1alpha1.MonitorStateInfo:
+		message = fmt.Sprintf("Secret expires in less than %d days", monitor.Spec.AlertThresholds.InfoDays)
+	case expiringsecretv1alpha1.MonitorStateWarning:
+		message = fmt.Sprintf("Secret expires in less than %d days", monitor.Spec.AlertThresholds.WarningDays)
+	case expiringsecretv1alpha1.MonitorStateCritical:
+		message = fmt.Sprintf("Secret expires in less than %d days", monitor.Spec.AlertThresholds.CriticalDays)
+	case expiringsecretv1alpha1.MonitorStateExpired:
+		message = fmt.Sprintf("Secret expired on %s", status.ExpiresAt.Format("2006-01-02"))
+	case expiringsecretv1alpha1.MonitorStateError:
+		message = "Error monitoring secret"
+	default:
+		message = ""
+	}
+
+	status.Message = message
+	return status
+}
+
+// updateStatus updates the Monitor status with the provided parameters and requeues for continuous monitoring
+func (r *MonitorReconciler) updateStatus(ctx context.Context,
+	monitor *expiringsecretv1alpha1.Monitor,
+	state expiringsecretv1alpha1.MonitorState,
+	message string,
+	expiresAt *metav1.Time,
+	secondsRemaining *int64) (ctrl.Result, error) {
+
+	logger := log.FromContext(ctx)
 	now := metav1.NewTime(time.Now())
 
 	// Update status fields
@@ -205,9 +247,12 @@ func (r *MonitorReconciler) updateStatus(ctx context.Context, monitor *expirings
 		monitor.Status.SecondsRemaining = secondsRemaining
 	}
 
+	monitor.Status = r.getDefaultMessageForState(monitor.Status, monitor)
+
 	// Update status subresource
 	err := r.Status().Update(ctx, monitor)
 	if err != nil {
+		logger.Error(err, "Failed to update Monitor status")
 		return ctrl.Result{}, err
 	}
 
@@ -216,14 +261,28 @@ func (r *MonitorReconciler) updateStatus(ctx context.Context, monitor *expirings
 }
 
 // cleanupMetrics removes metrics when a Monitor is deleted
-func (r *MonitorReconciler) cleanupMetrics(ns types.NamespacedName, registry string) {
+func (r *MonitorReconciler) cleanupMetrics(ctx context.Context, ns types.NamespacedName, registry string) {
+	logger := log.FromContext(ctx)
 	labels := prometheus.Labels{
-		"registry":  registry,
-		"name":      ns.Name,
-		"namespace": ns.Namespace,
+		"registry":          registry,
+		"monitor_name":      ns.Name,
+		"monitor_namespace": ns.Namespace,
 	}
-	secretValidUntilTimestamp.Delete(labels)
-	secretSecondsUntilExpiry.Delete(labels)
+	successSecretValidUntilTimestamp := secretValidUntilTimestamp.Delete(labels)
+	if successSecretValidUntilTimestamp {
+		logger.Info("Deleted metrics for Monitor, ValidUntilTimestamp", "monitor", ns, "registry", registry)
+	} else {
+		noSecretValidUntilTimestamp := secretValidUntilTimestamp.DeletePartialMatch(labels)
+		logger.Info("(Partial Match) Deleted metrics for Monitor, ValidUntilTimestamp", "monitor", ns, "registry", registry, "noOfMetricsDeleted", noSecretValidUntilTimestamp)
+	}
+
+	successSecretSecondsUntilExpiry := secretSecondsUntilExpiry.Delete(labels)
+	if successSecretSecondsUntilExpiry {
+		logger.Info("Deleted metrics for Monitor, SecondsUntilExpiry", "monitor", ns, "registry", registry)
+	} else {
+		noSecretSecondsUntilExpiry := secretSecondsUntilExpiry.DeletePartialMatch(labels)
+		logger.Info("(Partial Match) Deleted metrics for Monitor, SecondsUntilExpiry", "monitor", ns, "registry", registry, "noOfMetricsDeleted", noSecretSecondsUntilExpiry)
+	}
 }
 
 // mapSecretToMonitor maps a Secret to Monitor objects that reference it

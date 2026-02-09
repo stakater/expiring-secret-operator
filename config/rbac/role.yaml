@@ -13,7 +13,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - expiringsecret.stakater.com
+  - expiring-secrets.stakater.com
   resources:
   - monitors
   verbs:
@@ -25,13 +25,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - expiringsecret.stakater.com
+  - expiring-secrets.stakater.com
   resources:
   - monitors/finalizers
   verbs:
   - update
 - apiGroups:
-  - expiringsecret.stakater.com
+  - expiring-secrets.stakater.com
   resources:
   - monitors/status
   verbs:

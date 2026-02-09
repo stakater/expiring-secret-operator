@@ -33,6 +33,6 @@ jobs:
       CONTAINER_REGISTRY_URL: ghcr.io/stakater
       CONTAINER_REGISTRY_USERNAME: stakater-user
       CONTAINER_REGISTRY_PASSWORD: ${{ secrets.GHCR_TOKEN }}
-      STAKATER_AB_REPOS: ${{ secrets.STAKATER_AB_REPOS }}
+      #STAKATER_AB_REPOS: ${{ secrets.STAKATER_AB_REPOS }}
     with:
-      ENABLE_STAKATER_AB_GIT_AUTH: true
+      ENABLE_STAKATER_AB_GIT_AUTH: false

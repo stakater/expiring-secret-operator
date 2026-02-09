@@ -43,7 +43,6 @@ var _ = Describe("Monitor Controller", func() {
 			ValidUntilLabel  = "expiringsecret.stakater.com/validUntil"
 
 			timeout  = time.Second * 10
-			duration = time.Second * 10
 			interval = time.Millisecond * 250
 		)
 
@@ -146,14 +145,7 @@ var _ = Describe("Monitor Controller", func() {
 					return false
 				}
 
-				logger.Info("Current state: ",
-					"Spec", found.Spec,
-					"State", found.Status.State,
-					"ExpiresAt", found.Status.ExpiresAt,
-					"SecondsRemaining", found.Status.SecondsRemaining,
-					"LastChecked", found.Status.LastChecked)
-
-				return found.Status.State == "Info" && // 15 days should be in Info state (between 30 and 14 days)
+				return found.Status.State == expiringsecretv1alpha1.MonitorStateInfo && // 15 days should be in Info state (between 30 and 14 days)
 					found.Status.ExpiresAt != nil &&
 					found.Status.SecondsRemaining != nil &&
 					found.Status.LastChecked != nil
@@ -195,7 +187,7 @@ var _ = Describe("Monitor Controller", func() {
 				if err != nil {
 					return false
 				}
-				return found.Status.State == "Error" &&
+				return found.Status.State == expiringsecretv1alpha1.MonitorStateError &&
 					found.Status.Message == "Referenced secret not found"
 			}, timeout, interval).Should(BeTrue())
 		})
@@ -247,7 +239,7 @@ var _ = Describe("Monitor Controller", func() {
 				if err != nil {
 					return false
 				}
-				return found.Status.State == "Error" &&
+				return found.Status.State == expiringsecretv1alpha1.MonitorStateError &&
 					found.Status.Message != ""
 			}, timeout, interval).Should(BeTrue())
 		})
@@ -304,7 +296,7 @@ var _ = Describe("Monitor Controller", func() {
 				if err != nil {
 					return false
 				}
-				return found.Status.State == "Expired"
+				return found.Status.State == expiringsecretv1alpha1.MonitorStateExpired
 			}, timeout, interval).Should(BeTrue())
 		})
 
@@ -363,13 +355,20 @@ var _ = Describe("Monitor Controller", func() {
 				if err != nil {
 					return false
 				}
-				return found.Status.State == "Critical"
+				return found.Status.State == expiringsecretv1alpha1.MonitorStateCritical
 			}, timeout, interval).Should(BeTrue())
 		})
 	})
 
 	Context("When testing state calculation logic", func() {
-		var reconciler *MonitorReconciler
+		var (
+			reconciler       *MonitorReconciler
+			defaultThreshold = &expiringsecretv1alpha1.AlertThresholds{
+				InfoDays:     30,
+				WarningDays:  14,
+				CriticalDays: 7,
+			}
+		)
 
 		BeforeEach(func() {
 			reconciler = &MonitorReconciler{}
@@ -378,46 +377,49 @@ var _ = Describe("Monitor Controller", func() {
 		It("should calculate Valid state correctly", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				Spec: expiringsecretv1alpha1.MonitorSpec{
-					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{
-						CriticalDays: 7,
-						WarningDays:  14,
-					},
+					AlertThresholds: defaultThreshold,
 				},
 			}
 			// 30 days remaining
-			secondsRemaining := float64(30 * 24 * 60 * 60)
+			secondsRemaining := float64(31 * 24 * 60 * 60)
 			state := reconciler.calculateState(monitor, secondsRemaining)
-			Expect(state).To(Equal("Valid"))
+			Expect(state).To(Equal(expiringsecretv1alpha1.MonitorStateValid))
+		})
+
+		It("should calculate Info state correctly", func() {
+			monitor := &expiringsecretv1alpha1.Monitor{
+				Spec: expiringsecretv1alpha1.MonitorSpec{
+					AlertThresholds: defaultThreshold,
+				},
+			}
+			// 30 days remaining
+			secondsRemaining := float64(29 * 24 * 60 * 60)
+			state := reconciler.calculateState(monitor, secondsRemaining)
+			Expect(state).To(Equal(expiringsecretv1alpha1.MonitorStateInfo))
 		})
 
 		It("should calculate Warning state correctly", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				Spec: expiringsecretv1alpha1.MonitorSpec{
-					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{
-						CriticalDays: 7,
-						WarningDays:  14,
-					},
+					AlertThresholds: defaultThreshold,
 				},
 			}
 			// 10 days remaining (between 7 and 14)
 			secondsRemaining := float64(10 * 24 * 60 * 60)
 			state := reconciler.calculateState(monitor, secondsRemaining)
-			Expect(state).To(Equal("Warning"))
+			Expect(state).To(Equal(expiringsecretv1alpha1.MonitorStateWarning))
 		})
 
 		It("should calculate Critical state correctly", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				Spec: expiringsecretv1alpha1.MonitorSpec{
-					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{
-						CriticalDays: 7,
-						WarningDays:  14,
-					},
+					AlertThresholds: defaultThreshold,
 				},
 			}
 			// 3 days remaining (less than 7)
 			secondsRemaining := float64(3 * 24 * 60 * 60)
 			state := reconciler.calculateState(monitor, secondsRemaining)
-			Expect(state).To(Equal("Critical"))
+			Expect(state).To(Equal(expiringsecretv1alpha1.MonitorStateCritical))
 		})
 
 		It("should calculate Expired state correctly", func() {
@@ -425,7 +427,7 @@ var _ = Describe("Monitor Controller", func() {
 			// -5 days (expired 5 days ago)
 			secondsRemaining := float64(-5 * 24 * 60 * 60)
 			state := reconciler.calculateState(monitor, secondsRemaining)
-			Expect(state).To(Equal("Expired"))
+			Expect(state).To(Equal(expiringsecretv1alpha1.MonitorStateExpired))
 		})
 
 		It("should use default thresholds when not specified", func() {
@@ -433,7 +435,7 @@ var _ = Describe("Monitor Controller", func() {
 			// 10 days remaining (should be Warning with default 14-day threshold)
 			secondsRemaining := float64(10 * 24 * 60 * 60)
 			state := reconciler.calculateState(monitor, secondsRemaining)
-			Expect(state).To(Equal("Warning"))
+			Expect(state).To(Equal(expiringsecretv1alpha1.MonitorStateWarning))
 		})
 	})
 })

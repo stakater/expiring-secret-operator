@@ -25,26 +25,67 @@ import (
 	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck
 )
 
-const (
-	prometheusOperatorVersion = "v0.72.0"
-	prometheusOperatorURL     = "https://github.com/prometheus-operator/prometheus-operator/" +
-		"releases/download/%s/bundle.yaml"
+func Log(format string, a ...any) {
+	_, _ = fmt.Fprintf(GinkgoWriter, format+"\n", a...)
+}
 
-	certmanagerVersion = "v1.14.4"
-	certmanagerURLTmpl = "https://github.com/jetstack/cert-manager/releases/download/%s/cert-manager.yaml"
-)
-
-func warnError(err error) {
+func WarnError(err error) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "warning: %v\n", err)
 }
 
-// InstallPrometheusOperator installs the prometheus Operator to be used to export the enabled metrics.
-func InstallPrometheusOperator() error {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "create", "-f", url)
+// WaitForStatus waits until the specified condition is met for the given resource,
+// or times out
+// condition: the condition to wait for (e.g., "Established", "Ready")
+// resource: the resource to check (e.g., "crd/myresource", "pod/mypod")
+// namespace: the namespace of the resource (optional, can be empty for cluster-scoped resources)
+// timeout: how long to wait before giving up (e.g., "30s", "1m")
+func WaitForStatus(condition, resource, namespace, timeout string) error {
+	if timeout == "" {
+		timeout = "30s"
+	}
+
+	args := []string{
+		"wait",
+		fmt.Sprintf("--for=condition=%s", condition),
+		fmt.Sprintf("--timeout=%s", timeout),
+		resource,
+	}
+	if namespace != "" {
+		args = append(args, "-n", namespace)
+	}
+
+	cmd := exec.Command("kubectl", args...)
 	_, err := Run(cmd)
 	return err
 }
+
+/*
+func CheckOperatorReady(ns types.NamespacedName) error {
+	// Get controller pod name
+	cmd := exec.Command("kubectl", "get", "pods",
+		"-l", "control-plane=controller-manager",
+		"-n", ns.Namespace,
+		"-o", "jsonpath=\"{.items[0].metadata.name}\"")
+	podNameBytes, err := Run(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to get controller pod name: %v", err)
+	}
+	podName := string(podNameBytes)
+	if podName == "" {
+		return fmt.Errorf("no controller pod found")
+	}
+
+	// Check readyz endpoint directly via kubectl exec
+	cmd = exec.Command("kubectl", "exec", "-n", ns.Namespace, podName, "--",
+		"wget", "-q", "-O-", "http://localhost:8081/readyz")
+	_, err = Run(cmd)
+	if err != nil {
+		return fmt.Errorf("readyz endpoint not ready: %v", err)
+	}
+
+	return nil
+}
+*/
 
 // Run executes the provided command within this context
 func Run(cmd *exec.Cmd) ([]byte, error) {
@@ -66,43 +107,6 @@ func Run(cmd *exec.Cmd) ([]byte, error) {
 	return output, nil
 }
 
-// UninstallPrometheusOperator uninstalls the prometheus
-func UninstallPrometheusOperator() {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
-}
-
-// UninstallCertManager uninstalls the cert manager
-func UninstallCertManager() {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
-}
-
-// InstallCertManager installs the cert manager bundle.
-func InstallCertManager() error {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "apply", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		return err
-	}
-	// Wait for cert-manager-webhook to be ready, which can take time if cert-manager
-	// was re-installed after uninstalling on a cluster.
-	cmd = exec.Command("kubectl", "wait", "deployment.apps/cert-manager-webhook",
-		"--for", "condition=Available",
-		"--namespace", "cert-manager",
-		"--timeout", "5m",
-	)
-
-	_, err := Run(cmd)
-	return err
-}
-
 // LoadImageToKindClusterWithName loads a local docker image to the kind cluster
 func LoadImageToKindClusterWithName(name string) error {
 	cluster := "kind"
@@ -119,8 +123,8 @@ func LoadImageToKindClusterWithName(name string) error {
 // according to line breakers, and ignores the empty elements in it.
 func GetNonEmptyLines(output string) []string {
 	var res []string
-	elements := strings.Split(output, "\n")
-	for _, element := range elements {
+	elements := strings.SplitSeq(output, "\n")
+	for element := range elements {
 		if element != "" {
 			res = append(res, element)
 		}

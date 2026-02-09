@@ -42,7 +42,7 @@ data:
 ### 3. Create a Monitor Resource
 
 ```yaml
-apiVersion: expiringsecrets.stakater.com/v1alpha1
+apiVersion: expiring-secrets.stakater.com/v1alpha1
 kind: Monitor
 metadata:
   name: docker-registry-monitor

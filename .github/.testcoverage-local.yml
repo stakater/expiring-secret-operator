@@ -1,0 +1,23 @@
+# Path to coverage profile file (output of `go test -coverprofile` command).
+profile: cover.out
+# Holds coverage thresholds percentages, values should be in range [0-100].
+threshold:
+  # Minimum coverage percentage required for individual files.
+  file: 70
+  # Minimum coverage percentage required for each package.
+  package: 80
+  # Minimum overall project coverage percentage required.
+  total: 90
+
+exclude:
+  paths:
+    - ^cmd/main\.go
+#    - ^api/v1alpha1/.*
+#    - ^api/v1alpha1/monitor_types\.go
+#    - ^api/v1alpha1/zz_generated\.deepcopy\.go
+#    - ^catalog/alert-az-do/telemetry\.go
+    - third_party$
+    - builtin$
+    - examples$
+# When true, requires all coverage-ignore annotations to include explanatory comments
+force-annotation-comment: false

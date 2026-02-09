@@ -101,6 +101,21 @@ type AlertThresholds struct {
 	CriticalDays int32 `json:"criticalDays,omitempty"`
 }
 
+func (a *AlertThresholds) ApplyDefaults() {
+	if a == nil {
+		a = &AlertThresholds{}
+	}
+	if a.InfoDays == 0 {
+		a.InfoDays = 30
+	}
+	if a.WarningDays == 0 {
+		a.WarningDays = 14
+	}
+	if a.CriticalDays == 0 {
+		a.CriticalDays = 7
+	}
+}
+
 // MonitorStatus defines the observed state of Monitor
 type MonitorStatus struct {
 	// ExpiresAt is the expiration timestamp of the monitored secret

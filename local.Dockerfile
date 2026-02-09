@@ -8,9 +8,14 @@ ARG GIT_USER
 ENV CGO_ENABLED=0 GO111MODULE=on GOOS=linux TOKEN=$GIT_TOKEN
 
 RUN go env -w GOPRIVATE=github.com/$GIT_USER/*
-# Using oauth2 instead of x-oauth-basic because we are using fine grained token in pipeline
-# More Info : https://stackoverflow.com/a/66156992/3506115
-RUN git config --global url."https://oauth2:${TOKEN}@github.com/".insteadOf "https://github.com/"
+# Using ssh instead of oauth2/x-oauth-basic locally, so we don't have have to care about token
+RUN git config --global url."ssh://git@github.com".insteadOf "https://github.com" && \
+    mkdir -p -m 0600 /root/.ssh && \
+    ssh-keyscan github.com > /root/.ssh/known_hosts && \
+    touch /root/.ssh/config && \
+    echo "StrictHostKeyChecking no" >> /root/.ssh/config && \
+    chmod 600 /root/.ssh/known_hosts && \
+    chmod 644 /root/.ssh/config
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -18,7 +23,9 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
-RUN go mod download
+RUN --mount=type=ssh,id=default go mod download
+
+RUN rm -rf /root/.ssh
 
 # Copy the go source
 COPY cmd/main.go cmd/main.go
