@@ -19,7 +19,6 @@ jobs:
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.STAKATER_DELIVERY_SLACK_WEBHOOK }}
       CONTAINER_REGISTRY_URL: ghcr.io/stakater
-      #CONTAINER_REGISTRY_USERNAME: ${{ secrets.GHCR_USERNAME }}
       CONTAINER_REGISTRY_USERNAME: stakater-user
       CONTAINER_REGISTRY_PASSWORD: ${{ secrets.GHCR_TOKEN }}
       #STAKATER_AB_REPOS: ${{ secrets.STAKATER_AB_REPOS }}
