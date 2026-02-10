@@ -18,10 +18,12 @@ if [[ "$STAGED_GO_FILES" = "" ]]; then
   exit 0
 fi
 
+echo $(pwd)
+
 make pre-commit
 RES=$?
 
-if ! $RES; then
+if [ "${RES}" -ne 0 ]; then
 	printf "COMMIT FAILED!\n"
 	exit 1
 else
@@ -29,4 +31,3 @@ else
 fi
 
 exit 0
-
