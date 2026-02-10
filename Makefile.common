@@ -418,6 +418,10 @@ define rollout-controller-with-retry
 	  echo ">>> Rollout stalled — collecting debug info before restart"; \
 	  echo "---- Deployment describe ----"; \
 	  $(KUBECTL) -n "$$ns" describe deploy/"$$dep" || true; \
+	  echo "---- Deployment resource ----"; \
+	  $(KUBECTL) -n "$$ns" get deploy/"$$dep" -o yaml || true; \
+	  echo "---- Secrets ----"; \
+	  $(KUBECTL) -n "$$ns" get secrets -o wide || true; \
 	  echo "---- ReplicaSets ----"; \
 	  $(KUBECTL) -n "$$ns" get rs -l control-plane=controller-manager -o wide || true; \
 	  echo "---- Pods (wide) ----"; \
