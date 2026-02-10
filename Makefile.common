@@ -10,8 +10,10 @@ OPERATOR_NS ?= $(OPERATOR_NAME)-system
 
 # DOCKER_REPO_HOST defines the host of the docker registry to which images will be pushed.
 DOCKER_REPO_HOST ?= ghcr.io
+
 # DOCKER_REPO_BASE defines the base of the docker registry to which images will be pushed.
 DOCKER_REPO_BASE ?= $(DOCKER_REPO_HOST)/stakater
+
 # DOCKER_REPO_NAME defines the name of the docker repository to which images will be pushed.
 # The default value is set to $(OPERATOR_NAME)-operator, which will result in pushing to
 # ghcr.io/stakater/$(OPERATOR_NAME)-operator by default.
