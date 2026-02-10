@@ -463,7 +463,7 @@ common-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster spe
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: common-deploy
-common-deploy: manifests kustomize cluster load-image pull-secret install-dependencies install ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+common-deploy: manifests kustomize cluster load-image install-dependencies install ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	@echo ">> deploying controller to cluster"
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	cd config/default && $(KUSTOMIZE) edit set namespace $(OPERATOR_NS)

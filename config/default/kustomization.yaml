@@ -14,13 +14,13 @@ namePrefix: expiring-secrets-
 #  pairs:
 #    someName: someValue
 
+# [PROMETHEUS] Enable prometheus monitor.
+# [METRICS] Expose the controller manager metrics service.
 resources:
 - ../crd
 - ../rbac
 - ../manager
-# [PROMETHEUS] Enable prometheus monitor.
 - ../prometheus
-# [METRICS] Expose the controller manager metrics service.
 - metrics_service.yaml
 # [NETWORK POLICY] Protect the /metrics endpoint and Webhook Server with NetworkPolicy.
 # Only Pod(s) running a namespace labeled with 'metrics: enabled' will be able to gather the metrics.
@@ -29,9 +29,14 @@ resources:
 #- ../network-policy
 
 # Uncomment the patches line if you enable Metrics, and/or are using webhooks and cert-manager
-patches:
 # [METRICS] The following patch will enable the metrics endpoint using HTTPS and the port :8443.
 # More info: https://book.kubebuilder.io/reference/metrics
+patches:
+- path: manager_image_pull_secret_patch.yaml
+  target:
+    kind: Deployment
 - path: manager_metrics_patch.yaml
   target:
     kind: Deployment
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
