@@ -1,0 +1,77 @@
+name: test
+
+on: {}
+#on:
+#  push:
+#    branches: 
+#      - "master"
+#  pull_request:
+#    branches: 
+#      - "master"
+
+jobs:
+  unit_tests:
+    name: "Unit tests"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: 'go.mod'
+    - name: Build and test
+      run: make
+      env:
+        GOBIN: "/tmp/bin"
+
+    - name: download artifact (master.breakdown)
+      id: download-master-breakdown
+      uses: dawidd6/action-download-artifact@v11
+      with:
+        branch: master
+        workflow_conclusion: success
+        name: master.breakdown
+        if_no_artifact_found: warn
+
+    - name: check test coverage
+      uses: vladopajic/go-test-coverage@v2
+      id: coverage
+      continue-on-error: true # Should fail after coverage comment is posted
+      with:
+        config: ./.github/.testcoverage.yml
+        profile: cover.out
+        breakdown-file-name: ${{ github.ref_name == 'master' && 'master.breakdown' || '' }}
+        diff-base-breakdown-file-name: ${{ steps.download-master-breakdown.outputs.found_artifact == 'true' && 'master.breakdown' || '' }}
+
+    - uses: 8BitJonny/gh-get-current-pr@4.0.0
+      id: PR
+      with:
+        github-token: ${{ github.token }}
+        filterOutClosed: true
+        filterOutDraft: true
+
+    - name: post coverage report
+      uses: thollander/actions-comment-pull-request@v3
+      if: steps.PR.outputs.pr_found == 'true'
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        comment-tag: coverage-report
+        message: |
+          go-test-coverage report:
+          ```
+          ${{ fromJSON(steps.coverage.outputs.report) }}
+          ```
+
+    - name: "finally check coverage"
+      if: steps.coverage.outcome == 'failure'
+      shell: bash
+      run: echo "coverage check failed" && exit 1
+
+    - name: upload artifact (master.breakdown)
+      uses: actions/upload-artifact@v5
+      if: github.ref_name == 'master'
+      with:
+        name: master.breakdown
+        path: master.breakdown
+        if-no-files-found: error

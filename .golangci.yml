@@ -1,31 +1,16 @@
+version: "2"
+
 run:
-  timeout: 5m
+  modules-download-mode: readonly
   allow-parallel-runners: true
 
-issues:
-  # don't skip warning about doc comments
-  # don't exclude the default set of lint
-  exclude-use-default: false
-  # restore some of the defaults
-  # (fill in the rest as needed)
-  exclude-rules:
-    - path: "api/*"
-      linters:
-        - lll
-    - path: "internal/*"
-      linters:
-        - dupl
-        - lll
 linters:
-  disable-all: true
+  default: none
   enable:
     - dupl
     - errcheck
     - goconst
     - gocyclo
-    - gofmt
-    - goimports
-    - gosimple
     - govet
     - ineffassign
     - lll
@@ -33,7 +18,41 @@ linters:
     - nakedret
     - prealloc
     - staticcheck
-    - typecheck
     - unconvert
     - unparam
     - unused
+  exclusions:
+    generated: lax
+    rules:
+      - linters:
+          - lll
+        path: api/*
+      - linters:
+          - dupl
+          - lll
+        path: internal/*
+      # Allow dot-imports in these specific helper files
+      - path: '(^|.*/)[test|internal]/utils/[utils|shared]\.go$'
+        linters:
+          - staticcheck
+        text: '^ST1001: should not use dot imports'
+      # Also allow in any *_test.go file
+      - path: '.*_test\.go$'
+        linters:
+          - staticcheck
+        text: '^ST1001: should not use dot imports'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

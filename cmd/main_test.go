@@ -16,10 +16,20 @@ limitations under the License.
 
 package main
 
-import "testing"
+import (
+	"testing"
 
-func TestMain_Example(t *testing.T) {
-	t.Run("Sample test", func(t *testing.T) {
-		t.Log("Sample test")
-	})
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+func TestMain(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Main Suite")
 }
+
+var _ = Describe("Main", func() {
+	It("should run a sample test", func() {
+		Expect(true).To(BeTrue())
+	})
+})
