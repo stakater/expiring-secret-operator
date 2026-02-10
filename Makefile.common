@@ -5,11 +5,12 @@
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
 VERSION ?= 0.0.1
 OPERATOR_NAME ?= default
-DOCKER_REPO_BASE ?= default
 PROJECT_NAME ?= default
+OPERATOR_NS ?= $(OPERATOR_NAME)-system
 
+DOCKER_REPO_HOST ?= ghcr.io
+DOCKER_REPO_BASE ?= $(DOCKER_REPO_HOST)/stakater
 CATALOG_DIR_PATH ?= catalog
-TEST_NAMESPACE ?= $(OPERATOR_NAME)-system
 ALL_PKGS := ./...
 
 OPERATOR_KINDS ?= 
@@ -90,6 +91,7 @@ SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
 TEST_CLUSTER_NAME ?= e2e-test-cluster
+ACTION ?= all
 
 TEST_ARGS ?= -v -test.v
 
@@ -182,7 +184,7 @@ common-test-e2e: ## Run e2e tests with guaranteed cleanup even on failure
 		$(MAKE) run-e2e-test; \
 		exit_code=$$?; \
 		if [ $$exit_code -ne 0 ]; then \
-			kubectl logs deploy/$(OPERATOR_NAME)-controller-manager -n $(TEST_NAMESPACE); \
+			kubectl logs deploy/$(OPERATOR_NAME)-controller-manager -n $(OPERATOR_NS); \
 		fi; \
 		echo "Cleaning up..."; \
 		$(MAKE) post-e2e-test; \
@@ -237,7 +239,7 @@ common-uninstall-dependencies: $(foreach var,$(DEPENDENCIES),uninstall-$(var))
 
 HELM_CHART_DIR ?= charts/$(OPERATOR_NAME)
 HELM_VERSION ?= $(VERSION)$(GIT_TAG)
-HELM_REGISTRY ?= ghcr.io/stakater/charts
+HELM_REGISTRY ?= $(DOCKER_REPO_BASE)/charts
 HELM_CHART_NAME ?= $(OPERATOR_NAME)
 HELM_MK_URL ?= https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/makefiles/helm.mk
 HELM_MK := makefiles/helm.mk
@@ -273,6 +275,8 @@ common-helm-release: manifests kustomize helmify-bin yq download-helm-mk ## Down
 		IMG=$(IMG)
 
 ##@ Build
+
+PULL_SECRET_NAME ?= saap-dockerconfigjson
 
 .PHONY: common-check_license
 common-check_license:
@@ -357,7 +361,7 @@ common-cluster: ## Setup Kind cluster with specified action (default: cluster). 
 	KIND_VERSION=$(KIND_VERSION) \
 	LOCALBIN=$(LOCALBIN) \
 	OPERATOR_NAMESPACE=$(OPERATOR_NS) \
-	PULL_SECRET_NAME=saap-dockerconfigjson \
+	PULL_SECRET_NAME=$(PULL_SECRET_NAME) \
 	GHCR_USERNAME=$(GHCR_USERNAME) \
 	GHCR_TOKEN=$(GHCR_TOKEN) \
 	bash -s $(ACTION)
@@ -387,18 +391,66 @@ common-load-image: kind ## Load local image into Kind (if present).
 .PHONY: common-pull-secret
 common-pull-secret: ## Create GHCR pull secret in operator namespace.
 	@echo ">> creating pull secret in namespace '$(OPERATOR_NS)'"
-	$(KUBECTL) create namespace $(OPERATOR_NS) --dry-run=client -o yaml | $(KUBECTL) apply -f - ;\
-	$(KUBECTL) -n $(OPERATOR_NS) create secret docker-registry saap-dockerconfigjson \
-		--docker-server=ghcr.io \
+	$(KUBECTL) create namespace $(OPERATOR_NS) --dry-run=client -o yaml | $(KUBECTL) apply -f - $(KUBECTL_OUTPUT_REDIRECT); \
+	$(KUBECTL) -n $(OPERATOR_NS) create secret docker-registry $(PULL_SECRET_NAME) \
+		--docker-server=$(DOCKER_REPO_HOST) \
 		--docker-username=${GHCR_USERNAME} \
 		--docker-password=${GHCR_TOKEN} \
-		--dry-run=client -o yaml | $(KUBECTL) apply -f -
+		--dry-run=client -o yaml | $(KUBECTL) apply -f - $(KUBECTL_OUTPUT_REDIRECT)
 
 ##@ Deployment
 
 ifndef ignore-not-found
   ignore-not-found = false
 endif
+
+
+define rollout-controller-with-retry
+@bash -ceu '\
+	ns="$(OPERATOR_NS)"; \
+	dep="$(OPERATOR_NAME)-controller-manager"; \
+	echo ">>> Ensuring a fresh rollout (annotation bump)"; \
+	$(KUBECTL) -n "$$ns" patch deploy/"$$dep" --type merge \
+	  -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"rollout.ts\":\"$$(date +%s)\"}}}}}" || true; \
+	\
+	echo ">>> Waiting for rollout (90s fast path)…"; \
+	if ! $(KUBECTL) -n "$$ns" rollout status deploy/"$$dep" --timeout=90s; then \
+	  echo ">>> Rollout stalled — collecting debug info before restart"; \
+	  echo "---- Deployment describe ----"; \
+	  $(KUBECTL) -n "$$ns" describe deploy/"$$dep" || true; \
+	  echo "---- ReplicaSets ----"; \
+	  $(KUBECTL) -n "$$ns" get rs -l control-plane=controller-manager -o wide || true; \
+	  echo "---- Pods (wide) ----"; \
+	  $(KUBECTL) -n "$$ns" get pods -l control-plane=controller-manager -o wide || true; \
+	  echo "---- Pod events (recent 20) ----"; \
+	  $(KUBECTL) -n "$$ns" get events --sort-by=.lastTimestamp | tail -n 20 || true; \
+	  echo "---- Pod logs (last 50 lines, if any) ----"; \
+	  for p in $$( $(KUBECTL) -n "$$ns" get pods -l control-plane=controller-manager -o name 2>/dev/null ); do \
+	    echo "-- $$p --"; \
+	    $(KUBECTL) -n "$$ns" logs "$$p" --tail=50 2>/dev/null || true; \
+	  done; \
+	  echo ">>> End of debug info"; \
+	  \
+	  echo ">>> Performing clean restart (scale 0 → 1)…"; \
+	  $(KUBECTL) -n "$$ns" scale deploy/"$$dep" --replicas=0; \
+	  echo ">>> Waiting for pods to terminate…"; \
+	  for i in $$(seq 1 24); do \
+	    cnt="$$( $(KUBECTL) -n "$$ns" get pods -l control-plane=controller-manager --no-headers 2>/dev/null | wc -l | tr -d " " )"; \
+	    [ "$$cnt" = "0" ] && break; \
+	    sleep 5; \
+	  done; \
+	  echo ">>> Scaling deployment back up"; \
+	  $(KUBECTL) -n "$$ns" scale deploy/"$$dep" --replicas=1; \
+	  echo ">>> Retrying rollout (210s)…"; \
+	  $(KUBECTL) -n "$$ns" rollout status deploy/"$$dep" --timeout=210s; \
+	fi; \
+	\
+	echo ">>> Waiting for deployment availability…"; \
+	$(KUBECTL) -n "$$ns" wait --for=condition=Available deploy/"$$dep" --timeout=120s; \
+	\
+	echo ">>> Deployment $$dep successfully rolled out and ready."; \
+	'
+endef
 
 .PHONY: common-install
 common-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
@@ -411,16 +463,12 @@ common-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster spe
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: common-deploy
-common-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+common-deploy: manifests kustomize cluster load-image pull-secret install-dependencies install ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	@echo ">> deploying controller to cluster"
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	cd config/default && $(KUSTOMIZE) edit set namespace $(OPERATOR_NS)
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f - $(KUBECTL_OUTPUT_REDIRECT)
-	@echo ">> waiting for controller to be ready"
-	$(KUBECTL) wait --for=condition=Available \
-		--timeout=180s deployment/$(OPERATOR_NAME)-controller-manager \
-		-n $(OPERATOR_NAME)-system $(KUBECTL_OUTPUT_REDIRECT); 
-#	@(foreach var,$(OPERATOR_KINDS),crd/$(var)$(PROJECT_NAME) ;) $(KUBECTL_OUTPUT_REDIRECT)
-
+	$(call rollout-controller-with-retry)
 
 .PHONY: common-undeploy
 common-undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
