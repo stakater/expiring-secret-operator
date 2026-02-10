@@ -39,9 +39,9 @@ import (
 // Prometheus metrics
 var (
 	metricsLabels = []string{
-		"registry",
-		"monitor_name", "monitor_namespace",
-		"secret_name", "secret_namespace"}
+		"monitor_name", "monitor_namespace", "state",
+		"secret_registry", "secret_name", "secret_namespace",
+	}
 	secretValidUntilTimestamp = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "expiringsecret",
@@ -155,9 +155,10 @@ func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Update Prometheus metrics
 	labels := prometheus.Labels{
-		"registry":          monitor.Spec.Service,
 		"monitor_name":      monitor.Name,
 		"monitor_namespace": monitor.Namespace,
+		"state":             string(state),
+		"secret_registry":   monitor.Spec.Service,
 		"secret_name":       monitor.Spec.SecretRef.Name,
 		"secret_namespace":  monitor.Spec.SecretRef.Namespace,
 	}
@@ -264,9 +265,9 @@ func (r *MonitorReconciler) updateStatus(ctx context.Context,
 func (r *MonitorReconciler) cleanupMetrics(ctx context.Context, ns types.NamespacedName, registry string) {
 	logger := log.FromContext(ctx)
 	labels := prometheus.Labels{
-		"registry":          registry,
 		"monitor_name":      ns.Name,
 		"monitor_namespace": ns.Namespace,
+		//"secret_registry":   registry,
 	}
 	successSecretValidUntilTimestamp := secretValidUntilTimestamp.Delete(labels)
 	if successSecretValidUntilTimestamp {

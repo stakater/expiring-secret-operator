@@ -1,0 +1,46 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: expired-secret-rules
+  namespace: openshift-monitoring
+  labels:
+    prometheus: k8s
+    role: alert-rules
+spec:
+  groups:
+    - name: expired-secret.rules
+      rules:
+        - alert: SecretExpirationDateIsApproaching
+          expr: |
+            expiringsecret_monitor_until_expiration_seconds < 30*24*60*60
+            and expiringsecret_monitor_until_expiration_seconds >= 14*24*60*60
+          for: 10m
+          labels:
+            severity: info
+          annotations:
+            summary: "Secret expiration date is approaching"
+            description: |
+              The secret named '{{ $labels.secret_name }}' in '{{ $labels.secret_namespace }}' has an expiration date within the next 30 days.
+        - alert: SecretExpirationDateIsApproachingRapidly
+          expr: |
+            expiringsecret_monitor_until_expiration_seconds < 14*24*60*60
+            and expiringsecret_monitor_until_expiration_seconds >= 7*24*60*60
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Secret expiration date is approaching rapidly"
+            description: |
+              The secret named '{{ $labels.secret_name }}' in '{{ $labels.secret_namespace }}' has an expiration date within the next 14 days.
+        - alert: SecretExpirationDateIsCritical
+          expr: |
+            expiringsecret_monitor_until_expiration_seconds < 7*24*60*60
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Secret expiration date is critical"
+            description: |
+              The secret named '{{ $labels.secret_name }}' in '{{ $labels.secret_namespace }}' has an expiration date within the next 7 days.
+
+
