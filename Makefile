@@ -13,10 +13,4 @@ DOCKER_REPO_NAME ?= expiring-secret-operator
 .PHONY: pre-commit
 pre-commit: precheck check_license fmt vet lint
 
-.PHONY: do-e2e
-#do-e2e: undeploy docker-build install-dependencies load-image deploy load-image
-do-e2e: undeploy docker-build load-image deploy load-image
-#	go test  ./test/e2e/ -v -test.v -ginkgo.v
-	$(MAKE) run-e2e-test
-
 include Makefile.common

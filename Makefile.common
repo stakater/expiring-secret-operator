@@ -184,13 +184,18 @@ common-check-coverage: common-go-test-coverage
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 	$(GOBIN)/go-test-coverage --config=./.github/.testcoverage-local.yml
 
-# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
 .PHONY: common-test-e2e
-common-test-e2e: ## Run e2e tests with guaranteed cleanup even on failure
+common-test-e2e: ## Run e2e tests with the Go testing framework.
 	@echo ">> running E2E tests"
+	go test $(GOOPTS) ./test/e2e/ $(TEST_ARGS)
+
+# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
+.PHONY: common-test-e2e-dev
+common-test-e2e-dev: ## Run e2e tests locally with guaranteed cleanup even on failure
+	@echo ">> running E2E tests locally"
 	@{ \
 		$(MAKE) pre-e2e-test && \
-		$(MAKE) run-e2e-test; \
+		$(MAKE) test-e2e; \
 		exit_code=$$?; \
 		if [ $$exit_code -ne 0 ]; then \
 			kubectl logs deploy/$(OPERATOR_NAME)-controller-manager -n $(OPERATOR_NS); \
@@ -199,13 +204,6 @@ common-test-e2e: ## Run e2e tests with guaranteed cleanup even on failure
 		$(MAKE) post-e2e-test; \
 		exit $$exit_code; \
 	}
-
-
-# Run e2e tests.
-# This is separated from test-e2e to ensure cleanup happens even if tests fail.
-.PHONY: common-run-e2e-test
-common-run-e2e-test:
-	go test $(GOOPTS) ./test/e2e/ $(TEST_ARGS)
 
 .PHONY: common-lint
 common-lint: golangci-lint ## Run golangci-lint linter
@@ -223,7 +221,7 @@ common-lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 # Setup dependencies and deploy operator before e2e tests.
 # Call with ignore-not-found=true to ignore resource not found errors during deletion.
 .PHONY: common-pre-e2e-test
-common-pre-e2e-test: kind kustomize docker-build install-dependencies load-image
+common-pre-e2e-test: kind kustomize docker-build deploy
 	@echo "Installing CRDs and deploying operator..."
 	$(MAKE) install
 	$(MAKE) deploy
