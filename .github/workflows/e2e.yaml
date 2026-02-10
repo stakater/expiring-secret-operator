@@ -31,10 +31,8 @@ jobs:
     uses: stakater/.github/.github/workflows/operator_e2e.yaml@main
     secrets:
       CONTAINER_REGISTRY_URL: ghcr.io/stakater
-      CONTAINER_REGISTRY_USERNAME: ${{ secrets.TEST_USER }}
-      CONTAINER_REGISTRY_PASSWORD: ${{ secrets.TEST_TOKEN }}
-      #CONTAINER_REGISTRY_USERNAME: stakater-user
-      #CONTAINER_REGISTRY_PASSWORD: ${{ secrets.GHCR_TOKEN }}
+      CONTAINER_REGISTRY_USERNAME: stakater-user
+      CONTAINER_REGISTRY_PASSWORD: ${{ secrets.GHCR_TOKEN }}
       #STAKATER_AB_REPOS: ${{ secrets.STAKATER_AB_REPOS }}
     with:
       ENABLE_STAKATER_AB_GIT_AUTH: false
