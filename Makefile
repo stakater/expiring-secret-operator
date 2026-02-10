@@ -2,10 +2,8 @@ VERSION ?= 0.0.1
 OPERATOR_NAME ?= expiring-secrets
 PROJECT_NAME ?= expiring-secrets.stakater.com
 TEST_CLUSTER_NAME ?= kind
-DOCKER_REPO_NAME ?= $(OPERATOR_NAME)-operator
+DOCKER_REPO_NAME ?= expiring-secret-operator
 #SUPPRESS_OUTPUT ?= false
-
-BUNDLE_NAME ?= ghcr.io/stakater/$(OPERATOR_NAME)-bundle
 
 #TEST_ARGS ?= -v -test.v -ginkgo.v
 

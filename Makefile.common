@@ -58,14 +58,9 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 # $(PROJECT_NAME)/$(OPERATOR_NAME)-bundle:$VERSION and $(PROJECT_NAME)/$(OPERATOR_NAME)-catalog:$VERSION.
 IMAGE_TAG_BASE ?= $(DOCKER_REPO_BASE)/$(DOCKER_REPO_NAME)
 
-# BUNDLE_NAME defines the name of the bundle image.
-# The default value is set to $(IMAGE_TAG_BASE)-bundle,
-# which will result in pushing to $(DOCKER_REPO_BASE)/$(DOCKER_REPO_NAME)-bundle by default.
-BUNDLE_NAME ?= $(IMAGE_TAG_BASE)-bundle
-
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
-BUNDLE_IMG ?= $(BUNDLE_NAME):v$(VERSION)$(GIT_TAG)
+BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)$(GIT_TAG)
 
 # BUNDLE_GEN_FLAGS are the flags passed to the operator-sdk generate bundle command
 BUNDLE_GEN_FLAGS ?= -q --overwrite --version $(VERSION) $(BUNDLE_METADATA_OPTS)
