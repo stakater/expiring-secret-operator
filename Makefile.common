@@ -285,6 +285,20 @@ common-test-e2e-dev: ## Run e2e tests locally with guaranteed cleanup even on fa
 		exit $$exit_code; \
 	}
 
+.PHONY: common-test-scorecard
+common-test-scorecard: cluster bundle ## Run operator-sdk scorecard tests.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running operator-sdk scorecard$(RESET)"
+	@failed_tests=$$($(OPERATOR_SDK) scorecard bundle \
+		-c bundle/tests/scorecard/config.yaml --output json | \
+		jq -r '.items[] | select(.status.results[]?.state == "fail") | "FAILED: " + .spec.labels.test + " (" + (.spec.labels.suite // "unknown") + ")\n  Errors:\n    - " + ((.status.results[]?.errors // []) | join("\n    - ")) + "\n  Suggestions:\n    -" + ((.status.results[]?.suggestions // []) | join("\n    -")) + "\n  Log:\n" + (.status.results[]?.log // "") + "\n"'); \
+	if [ -n "$$failed_tests" ]; then \
+		echo "$(FG_RED)❌ Failed scorecard tests:$(RESET)"; \
+		echo "$$failed_tests"; \
+		exit 1; \
+	else \
+		echo "$(FG_GREEN)✅ All scorecard tests passed!$(RESET)"; \
+	fi
+
 .PHONY: common-lint
 common-lint: golangci-lint ## Run golangci-lint linter
 	@echo "$(FG_BLUE)>> $(FG_GREEN)running golangci-lint$(RESET)"
@@ -448,6 +462,7 @@ common-cluster: ## Setup Kind cluster with specified action (default: cluster). 
 	TEST_CLUSTER_NAME=$(TEST_CLUSTER_NAME) \
 	IMG=$(IMG) \
 	CONTAINER_TOOL=$(CONTAINER_TOOL) \
+	KIND=$(KIND) \
 	KIND_VERSION=$(KIND_VERSION) \
 	LOCALBIN=$(LOCALBIN) \
 	OPERATOR_NAMESPACE=$(OPERATOR_NS) \
@@ -455,7 +470,6 @@ common-cluster: ## Setup Kind cluster with specified action (default: cluster). 
 	GHCR_USERNAME=$(GHCR_USERNAME) \
 	GHCR_TOKEN=$(GHCR_TOKEN) \
 	bash -s $(ACTION)
-	KIND = $(shell which kind)
 
 
 .PHONY: common-load-image
@@ -601,7 +615,7 @@ GO_TOOLCHAIN ?= go1.25.0
 .PHONY: common-govulncheck
 common-govulncheck: $(GOVULNCHECK) ## Download govulncheck locally if necessary.
 $(GOVULNCHECK): $(LOCALBIN)
-	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing govulncheck $(GOVULNCHECK_VERSION) to $(GOVULNCHECK)$(RESET)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring govulncheck $(GOVULNCHECK_VERSION) to $(GOVULNCHECK)$(RESET)"
 	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
 
 .PHONY: common-kustomize
@@ -621,7 +635,8 @@ $(KUSTOMIZE): $(LOCALBIN)
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
 .PHONY: common-kind
-common-kind: 
+common-kind: ## Download kind locally if necessary.
+$(KIND): $(LOCALBIN)
 ifeq (,$(wildcard $(KIND)))
 ifeq (,$(shell which kind 2>/dev/null))
 	@echo "$(FG_BLUE)>> $(FG_GREEN)kind not found, installing...$(RESET)"; \
@@ -634,18 +649,18 @@ endif
 .PHONY: common-controller-gen
 common-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
 $(CONTROLLER_GEN): $(LOCALBIN)
-	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing controller-gen $(CONTROLLER_TOOLS_VERSION) to $(CONTROLLER_GEN)$(RESET)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring controller-gen $(CONTROLLER_TOOLS_VERSION) to $(CONTROLLER_GEN)$(RESET)"
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
 .PHONY: common-envtest
 common-envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
-	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing envtest $(ENVTEST_VERSION) to $(ENVTEST)$(RESET)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring envtest $(ENVTEST_VERSION) to $(ENVTEST)$(RESET)"
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
 .PHONY: common-golangci-lint
 common-golangci-lint: ## Download golangci-lint locally if necessary.
-	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $(GOLANGCI_LINT)$(RESET)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring golangci-lint $(GOLANGCI_LINT_VERSION) to $(GOLANGCI_LINT)$(RESET)"
 	GOTOOLCHAIN=go1.25.0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	mkdir -p $(LOCALBIN)
 	mv $$(go env GOPATH)/bin/golangci-lint $(LOCALBIN)/golangci-lint
@@ -662,7 +677,7 @@ common-helmify: manifests kustomize download-helm-mk helmify-bin ## Generate Hel
 
 helmify-bin: $(HELMIFY)
 $(HELMIFY): $(LOCALBIN)
-	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing helmify $(HELMIFY_VERSION) to $(HELMIFY)$(RESET)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring helmify $(HELMIFY_VERSION) to $(HELMIFY)$(RESET)"
 	$(call go-install-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify,$(HELMIFY_VERSION))
 
 .PHONY: common-helm
@@ -680,7 +695,7 @@ endif
 .PHONY: common-go-test-coverage
 common-go-test-coverage: $(GOTESTCOVERAGE) ## Download go-test-coverage locally if necessary.
 $(GOTESTCOVERAGE): $(LOCALBIN)
-	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing go-test-coverage $(GOTESTCOVERAGE_VERSION) to $(GOTESTCOVERAGE)$(RESET)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring go-test-coverage $(GOTESTCOVERAGE_VERSION) to $(GOTESTCOVERAGE)$(RESET)"
 	$(call go-install-tool,$(GOTESTCOVERAGE),github.com/vladopajic/go-test-coverage/v2,$(GOTESTCOVERAGE_VERSION))
 
 #.PHONY: common-tenant-crd-install
@@ -742,7 +757,7 @@ common-uninstall-certmanager:
 
 .PHONY: common-install-gateway
 common-install-gateway:
-	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing gateway-api $(GATEWAY_VERSION)$(RESET)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring gateway-api $(GATEWAY_VERSION)$(RESET)"
 	$(call k8s-tool,create,kubernetes-sigs/gateway-api,$(GATEWAY_VERSION),standard-install.yaml)
 
 .PHONY: common-uninstall-gateway
