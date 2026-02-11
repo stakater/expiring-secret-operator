@@ -5,6 +5,13 @@ resources:
 - ../default
 - ../samples
 - ../scorecard
+patches:
+- target:
+    group: operators.coreos.com
+    version: v1alpha1
+    kind: ClusterServiceVersion
+    name: expiring-secrets.v0.0.0
+  path: patches/minkubeversion.config.yaml
 
 # [WEBHOOK] To enable webhooks, uncomment all the sections with [WEBHOOK] prefix.
 # Do NOT uncomment sections with prefix [CERTMANAGER], as OLM does not support cert-manager.
@@ -20,7 +27,6 @@ resources:
 #    # Remove the manager container's "cert" volumeMount, since OLM will create and mount a set of certs.
 #    # Update the indices in this path if adding or removing containers/volumeMounts in the manager's Deployment.
 #    - op: remove
-
 #      path: /spec/template/spec/containers/0/volumeMounts/0
 #    # Remove the "cert" volume, since OLM will create and mount a set of certs.
 #    # Update the indices in this path if adding or removing volumes in the manager's Deployment.
