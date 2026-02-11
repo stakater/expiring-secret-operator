@@ -120,24 +120,28 @@ func (a *AlertThresholds) ApplyDefaults() {
 type MonitorStatus struct {
 	// ExpiresAt is the expiration timestamp of the monitored secret
 	// +kubebuilder:validation:Optional
+	// +operator-sdk:csv:customresourcedefinitions:type=status,xDescriptors="urn:alm:descriptor:com.tectonic.ui:text",displayName="Expiration timestamp"
 	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 
 	// SecondsRemaining is the number of seconds until expiration
 	// +kubebuilder:validation:Optional
+	// +operator-sdk:csv:customresourcedefinitions:type=status,xDescriptors="urn:alm:descriptor:com.tectonic.ui:number",displayName="Seconds until expiration"
 	SecondsRemaining *int64 `json:"secondsRemaining,omitempty"`
 
 	// LastChecked is the timestamp when the secret was last checked
 	// +kubebuilder:validation:Optional
+	// +operator-sdk:csv:customresourcedefinitions:type=status,xDescriptors="urn:alm:descriptor:com.tectonic.ui:text",displayName="Last check timestamp"
 	LastChecked *metav1.Time `json:"lastChecked,omitempty"`
 
 	// State represents the current state of the monitor
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:Enum=Valid;Info;Warning;Critical;Expired;Error
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:select:Valid","urn:alm:descriptor:com.tectonic.ui:select:Info","urn:alm:descriptor:com.tectonic.ui:select:Warning","urn:alm:descriptor:com.tectonic.ui:select:Critical","urn:alm:descriptor:com.tectonic.ui:select:Expired","urn:alm:descriptor:com.tectonic.ui:select:Error"},displayName="Current state"
+	// +operator-sdk:csv:customresourcedefinitions:type=status,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:select:Valid","urn:alm:descriptor:com.tectonic.ui:select:Info","urn:alm:descriptor:com.tectonic.ui:select:Warning","urn:alm:descriptor:com.tectonic.ui:select:Critical","urn:alm:descriptor:com.tectonic.ui:select:Expired","urn:alm:descriptor:com.tectonic.ui:select:Error"},displayName="Current state"
 	State MonitorState `json:"state,omitempty"`
 
 	// Message provides additional information about the current state
 	// +kubebuilder:validation:Optional
+	// +operator-sdk:csv:customresourcedefinitions:type=status,xDescriptors="urn:alm:descriptor:com.tectonic.ui:text",displayName="Status message"
 	Message string `json:"message,omitempty"`
 
 	// Conditions represent the latest available observations of the monitor's state
