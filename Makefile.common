@@ -76,6 +76,11 @@ endif
 # Set the Operator SDK version to use. By default, what is installed on the system is used.
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= v1.39.2
+
+# Set the OPM version to use for bundle validation and index image building.
+# By default, what is installed on the system is used.
+OPM_VERSION ?= v1.23.0
+
 # Image URL to use all building/pushing image targets
 IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)$(GIT_TAG)
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
@@ -107,6 +112,31 @@ TEST_ARGS ?= -v -test.v
 PKGS     := $(shell go list $(ALL_PKGS) | grep -v /e2e)
 DEPENDENCIES := prometheus-operator certmanager
 
+# COLORS
+
+BOLD            := $(shell tput -Txterm bold)
+UNDER           := $(shell tput -Txterm smul)
+FG_BLACK        := $(shell tput -Txterm setaf 0)
+FG_RED          := $(shell tput -Txterm setaf 1)
+FG_GREEN        := $(shell tput -Txterm setaf 2)
+FG_YELLOW       := $(shell tput -Txterm setaf 3)
+FG_LIGHTPURPLE  := $(shell tput -Txterm setaf 4)
+FG_PURPLE       := $(shell tput -Txterm setaf 5)
+FG_BLUE         := $(shell tput -Txterm setaf 6)
+FG_WHITE        := $(shell tput -Txterm setaf 7)
+BG_BLACK        := $(shell tput -Txterm setab 0)
+BG_RED          := $(shell tput -Txterm setab 1)
+BG_GREEN        := $(shell tput -Txterm setab 2)
+BG_YELLOW       := $(shell tput -Txterm setab 3)
+BG_LIGHTPURPLE  := $(shell tput -Txterm setab 4)
+BG_PURPLE       := $(shell tput -Txterm setab 5)
+BG_BLUE         := $(shell tput -Txterm setab 6)
+BG_WHITE        := $(shell tput -Txterm setab 7)
+RESET           := $(shell tput -Txterm sgr0)    
+
+
+# END COLORS
+
 # This rule is used to forward a target like "build" to "common-build".  This
 # allows a new "build" target to be defined in a Makefile which includes this
 # one and override "common-build" without override warnings.
@@ -128,9 +158,57 @@ common-all: precheck check_license lint build
 # More info on the awk command:
 # http://linuxcommand.org/lc3_adv_awk.php
 
+MAX_LINE_LENGTH ?= 78
+# 20 for target name
+TARGET_WIDTH ?= 22
+
+# This is used to calculate the maximum length of the description
+# part of the help text, based on the total max line length and the
+# width allocated for the target name.
+# The '-7' accounts for the spacing and formatting characters between
+# the target and description.
+#DESC_MAX_LEN := $(shell echo ${MAX_LINE_LENGTH}-${TARGET_WIDTH}-7 | bc)
+DESC_MAX_LEN := $(shell echo ${MAX_LINE_LENGTH}-${TARGET_WIDTH}-2 | bc)
+
+# This is used to split long descriptions into multiple lines with proper 
+# indentation, without breaking words in half.
+# It looks for the last space before the max line length to break the line.
+# It's also very verbose written, since "printf" take colorcodes into
+# account for string length, while "awk" does not, so we need to manually
+# calculate the spacing for alignment.
 .PHONY: common-help
 common-help: ## Display this help.
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { target = $$1; sub(/^common-/, "", target); desc = $$2; printf "  \033[36m%-20s\033[0m ", target; if (length(desc) > 70) { while (length(desc) > 70) { pos = 70; while (pos > 0 && substr(desc, pos, 1) != " ") pos--; if (pos == 0) pos = 70; printf "%s\n%24s", substr(desc, 1, pos), ""; desc = substr(desc, pos+1); } } printf "%s\n", desc } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@echo ''
+	@echo '$(BOLD)Usage:$(RESET)'
+	@echo '  ${FG_YELLOW}make${RESET} ${FG_GREEN}<target>${RESET}'
+	@echo ''
+	@echo '$(BOLD)Targets:$(RESET)'
+	@awk 'BEGIN {FS = ":.*##";} /^[a-zA-Z_0-9-]+:.*?##/ { \
+		target = $$1; \
+		sub(/^common-/, "", target); \
+		desc = $$2; \
+		printf "  "; \
+		printf "$(FG_YELLOW)%s$(RESET)", target; \
+		printf "%*s", $(TARGET_WIDTH) - length(target) - 5, ""; \
+		\
+		if (length(desc) > $(DESC_MAX_LEN)) { \
+			while (length(desc) > $(DESC_MAX_LEN)) { \
+				pos = $(DESC_MAX_LEN); \
+				while (pos > 0 && substr(desc, pos, 1) != " ") pos--; \
+				if (pos == 0) pos = $(DESC_MAX_LEN); \
+				\
+				printf "$(FG_GREEN)%s$(RESET)\n  ", substr(desc, 1, pos); \
+				printf "%*s", $(TARGET_WIDTH), ""; \
+				\
+				desc = substr(desc, pos + 1); \
+			} \
+		} \
+		printf "$(FG_GREEN)%s$(RESET)\n", desc \
+	} \
+	/^##@/ { \
+		printf "\n$(BOLD)%s:$(RESET)\n", substr($$0, 5) \
+	} ' $(MAKEFILE_LIST)
+	@echo ''
 
 ##@ Development
 .PHONY: precheck
@@ -150,49 +228,51 @@ endef
 
 .PHONY: common-manifests
 common-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)generating manifests$(RESET)"
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="$(ALL_PKGS)" output:crd:artifacts:config=config/crd/bases
 
 .PHONY: common-generate
 common-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)generating code$(RESET)"
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="$(ALL_PKGS)"
 
 .PHONY: common-fmt
 common-fmt: ## Run go fmt against code.
-	@echo ">> running go fmt"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running go fmt$(RESET)"
 	go fmt $(GOOPTS) $(ALL_PKGS)
 
 .PHONY: common-vet
 common-vet: ## Run go vet against code.
-	@echo ">> running go vet"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running go vet$(RESET)"
 	go vet $(GOOPTS) $(ALL_PKGS)
 
 .PHONY: common-test
 common-test: manifests generate fmt vet envtest ## Run tests with the Go testing framework.
-	@echo ">> running all tests"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running all tests$(RESET)"
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 	go test $(GOOPTS) $(PKGS) $(TEST_ARGS)
 
 .PHONY: common-coverage
 common-coverage: $(GOTEST_DIR)
-	@echo ">> running all tests with coverage"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running all tests with coverage$(RESET)"
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 	go test $(GOOPTS) $(PKGS) -coverprofile=./cover.out -covermode=atomic -coverpkg=$(PKGS)
 
 .PHONY: common-check-coverage
 common-check-coverage: common-go-test-coverage
-	@echo ">> summarizing coverage"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)summarizing coverage$(RESET)"
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 	$(GOBIN)/go-test-coverage --config=./.github/.testcoverage-local.yml
 
 .PHONY: common-test-e2e
 common-test-e2e: ## Run e2e tests with the Go testing framework.
-	@echo ">> running E2E tests"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running E2E tests$(RESET)"
 	go test $(GOOPTS) ./test/e2e/ $(TEST_ARGS)
 
 # Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
 .PHONY: common-test-e2e-dev
 common-test-e2e-dev: ## Run e2e tests locally with guaranteed cleanup even on failure
-	@echo ">> running E2E tests locally"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running E2E tests locally$(RESET)"
 	@{ \
 		$(MAKE) pre-e2e-test && \
 		$(MAKE) test-e2e; \
@@ -207,12 +287,12 @@ common-test-e2e-dev: ## Run e2e tests locally with guaranteed cleanup even on fa
 
 .PHONY: common-lint
 common-lint: golangci-lint ## Run golangci-lint linter
-	@echo ">> running golangci-lint"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running golangci-lint$(RESET)"
 	$(GOLANGCI_LINT) run --timeout=10m
 
 .PHONY: common-lint-fix
 common-lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
-	@echo ">> running golangci-lint --fix"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running golangci-lint --fix$(RESET)"
 	$(GOLANGCI_LINT) run --fix
 
 ## Internal targets for installing/uninstalling dependencies for e2e tests.
@@ -221,8 +301,8 @@ common-lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 # Setup dependencies and deploy operator before e2e tests.
 # Call with ignore-not-found=true to ignore resource not found errors during deletion.
 .PHONY: common-pre-e2e-test
-common-pre-e2e-test: kind kustomize docker-build deploy
-	@echo "Installing CRDs and deploying operator..."
+common-pre-e2e-test: kustomize docker-build
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing CRDs and deploying operator...$(RESET)"
 	$(MAKE) install
 	$(MAKE) deploy
 
@@ -230,17 +310,18 @@ common-pre-e2e-test: kind kustomize docker-build deploy
 # Call with ignore-not-found=true to ignore resource not found errors during deletion.
 .PHONY: common-post-e2e-test
 common-post-e2e-test: undeploy uninstall-dependencies
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Uninstalling CRDs and undeploying operator...$(RESET)"
 	## Make sure to undeploy before uninstalling CRDs
 
 # Install dependencies for e2e tests
 .PHONY: common-install-dependencies
 common-install-dependencies: $(foreach var,$(DEPENDENCIES),install-$(var))
-	@echo "Installed: $(DEPENDENCIES)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installed: $(DEPENDENCIES)$(RESET)"
 
 # Uninstall dependencies for e2e tests
 .PHONY: common-uninstall-dependencies
 common-uninstall-dependencies: $(foreach var,$(DEPENDENCIES),uninstall-$(var))
-	@echo "Uninstalled: $(DEPENDENCIES)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Uninstalled: $(DEPENDENCIES)$(RESET)"
 
 ##@ Helm
 
@@ -263,13 +344,13 @@ endef
 
 .PHONY: common-download-helm-mk
 common-download-helm-mk: ## Download remote makefile into makefiles/helm.mk (only if missing)
-	@echo ">> downloading helm.mk from $(HELM_MK_URL)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)downloading helm.mk from $(HELM_MK_URL)$(RESET)"
 	$(call download-file,$(HELM_MK_URL),$(HELM_MK))
 
 
 .PHONY: common-helm-release
 common-helm-release: manifests kustomize helmify-bin yq download-helm-mk ## Download remote helm.mk and run its helm-release target
-	@echo "Invoking downloaded helm makefile: $(HELM_MK)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Invoking downloaded helm makefile: $(HELM_MK)$(RESET)"
 	PATH="$(LOCALBIN):$$PATH" $(MAKE) -f $(HELM_MK) helm-release \
 		VERSION=$(VERSION) \
 		GIT_TAG=$(GIT_TAG) \
@@ -284,10 +365,12 @@ common-helm-release: manifests kustomize helmify-bin yq download-helm-mk ## Down
 ##@ Build
 
 PULL_SECRET_NAME ?= saap-dockerconfigjson
+GHCR_USERNAME ?= default
+GHCR_TOKEN ?= default
 
 .PHONY: common-check_license
 common-check_license:
-	@echo ">> checking license header"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)checking license header$(RESET)"
 	@licRes=$$(for file in $$(find . -type f -iname '*.go' ! -path './vendor/*') ; do \
                awk 'NR<=3' $$file | grep -Eq "(Copyright|generated|GENERATED)" || echo $$file; \
        done); \
@@ -299,12 +382,12 @@ common-check_license:
 
 .PHONY: common-build
 common-build: manifests generate fmt vet ## Build manager binary.
-	@echo ">> building manager binary"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)building manager binary$(RESET)"
 	go build -o bin/manager cmd/main.go
 
 .PHONY: common-run
 common-run: manifests generate fmt vet ## Run a controller from your host.
-	@echo ">> running manager"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)running manager$(RESET)"
 	go run ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
@@ -312,7 +395,7 @@ common-run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: common-docker-build
 common-docker-build: ## Build docker image with the manager.
-	@echo ">> building docker image ${IMG}"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)building docker image ${IMG}$(RESET)"
 ifndef CI
 	$(CONTAINER_TOOL) build -f local.Dockerfile --ssh default=$${SSH_AUTH_SOCK} -t ${IMG} .
 else
@@ -321,7 +404,7 @@ endif
 
 .PHONY: common-docker-push
 common-docker-push: ## Push docker image with the manager.
-	@echo ">> pushing docker image ${IMG}"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)pushing docker image ${IMG}$(RESET)"
 	$(CONTAINER_TOOL) push ${IMG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
@@ -333,7 +416,7 @@ common-docker-push: ## Push docker image with the manager.
 PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 .PHONY: common-docker-buildx
 common-docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	@echo ">> building and pushing docker image ${IMG} for platforms: ${PLATFORMS}"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)building and pushing docker image ${IMG} for platforms: ${PLATFORMS}$(RESET)"
 	@set -euo pipefail; \
 	# make a temp Dockerfile that injects --platform=${BUILDPLATFORM} in the FIRST FROM
 	tmp="$$(mktemp -t Dockerfile.cross.XXXXXX)"; \
@@ -353,14 +436,14 @@ common-docker-buildx: ## Build and push docker image for the manager for cross-p
 
 .PHONY: common-build-installer
 common-build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
-	@echo ">> building installer manifests"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)building installer manifests$(RESET)"
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
 .PHONY: common-cluster
 common-cluster: ## Setup Kind cluster with specified action (default: cluster). Usage: make cluster ACTION=<action>
-	@echo ">> setting up Kind cluster with action '$(ACTION)'"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)setting up Kind cluster with action '$(ACTION)'$(RESET)"
 	curl -sSL https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/scripts/setup-kind-cluster.sh | \
 	TEST_CLUSTER_NAME=$(TEST_CLUSTER_NAME) \
 	IMG=$(IMG) \
@@ -372,32 +455,22 @@ common-cluster: ## Setup Kind cluster with specified action (default: cluster). 
 	GHCR_USERNAME=$(GHCR_USERNAME) \
 	GHCR_TOKEN=$(GHCR_TOKEN) \
 	bash -s $(ACTION)
+	KIND = $(shell which kind)
 
-.PHONY: common-kind
-common-kind: 
-	@if [ ! -f "$(KIND)" ]; then \
-		echo ">> kind not found, installing..."; \
-		$(MAKE) install-kind-binary; \
-	fi
-
-.PHONY: install-kind-binary
-install-kind-binary: $(LOCALBIN)
-	@echo ">> installing kind $(KIND_VERSION) to $(KIND)"
-	$(call go-install-tool,$(KIND),sigs.k8s.io/kind,$(KIND_VERSION))
 
 .PHONY: common-load-image
 common-load-image: kind ## Load local image into Kind (if present).
-	@echo ">> checking for local image to load into Kind cluster"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)checking for local image to load into Kind cluster$(RESET)"
 	@if $(CONTAINER_TOOL) images --format "table {{.Repository}}:{{.Tag}}" | grep "^$(IMG)"; then \
-		echo "Found local image $(IMG), loading into Kind cluster $(TEST_CLUSTER_NAME)"; \
+		echo "$(FG_BLUE)>> $(FG_GREEN)Found local image $(IMG), loading into Kind cluster $(TEST_CLUSTER_NAME)$(RESET)"; \
 		$(KIND) load docker-image $(IMG) --name $(TEST_CLUSTER_NAME); \
 	else \
-		echo "Local image $(IMG) not found, cluster will pull from registry"; \
+		echo "$(FG_BLUE)>> $(FG_RED)Local image $(IMG) not found, cluster will pull from registry$(RESET)"; \
 	fi
 
 .PHONY: common-pull-secret
 common-pull-secret: ## Create GHCR pull secret in operator namespace.
-	@echo ">> creating pull secret in namespace '$(OPERATOR_NS)'"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)creating pull secret in namespace '$(OPERATOR_NS)'$(RESET)"
 	$(KUBECTL) create namespace $(OPERATOR_NS) --dry-run=client -o yaml | $(KUBECTL) apply -f - $(KUBECTL_OUTPUT_REDIRECT); \
 	$(KUBECTL) -n $(OPERATOR_NS) create secret docker-registry $(PULL_SECRET_NAME) \
 		--docker-server=$(DOCKER_REPO_HOST) \
@@ -416,66 +489,66 @@ define rollout-controller-with-retry
 @bash -ceu '\
 	ns="$(OPERATOR_NS)"; \
 	dep="$(OPERATOR_NAME)-controller-manager"; \
-	echo ">>> Ensuring a fresh rollout (annotation bump)"; \
+	echo "$(FG_BLUE)>> $(FG_GREEN)Ensuring a fresh rollout (annotation bump)$(RESET)"; \
 	$(KUBECTL) -n "$$ns" patch deploy/"$$dep" --type merge \
 	  -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"rollout.ts\":\"$$(date +%s)\"}}}}}" || true; \
 	\
-	echo ">>> Waiting for rollout (90s fast path)…"; \
+	echo "$(FG_BLUE)>> $(FG_GREEN)Waiting for rollout (90s fast path)…$(RESET)"; \
 	if ! $(KUBECTL) -n "$$ns" rollout status deploy/"$$dep" --timeout=90s; then \
-	  echo ">>> Rollout stalled — collecting debug info before restart"; \
-	  echo "---- Deployment describe ----"; \
+	  echo "$(FG_BLUE)>> $(FG_RED)Rollout stalled — collecting debug info before restart$(RESET)"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)---- Deployment describe ----$(RESET)"; \
 	  $(KUBECTL) -n "$$ns" describe deploy/"$$dep" || true; \
-	  echo "---- Deployment resource ----"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)---- Deployment resource ----$(RESET)"; \
 	  $(KUBECTL) -n "$$ns" get deploy/"$$dep" -o yaml || true; \
-	  echo "---- Secrets ----"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)---- Secrets ----$(RESET)"; \
 	  $(KUBECTL) -n "$$ns" get secrets -o wide || true; \
-	  echo "---- ReplicaSets ----"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)---- ReplicaSets ----$(RESET)"; \
 	  $(KUBECTL) -n "$$ns" get rs -l control-plane=controller-manager -o wide || true; \
-	  echo "---- Pods (wide) ----"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)---- Pods (wide) ----$(RESET)"; \
 	  $(KUBECTL) -n "$$ns" get pods -l control-plane=controller-manager -o wide || true; \
-	  echo "---- Pod events (recent 20) ----"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)---- Pod events (recent 20) ----$(RESET)"; \
 	  $(KUBECTL) -n "$$ns" get events --sort-by=.lastTimestamp | tail -n 20 || true; \
-	  echo "---- Pod logs (last 50 lines, if any) ----"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)---- Pod logs (last 50 lines, if any) ----$(RESET)"; \
 	  for p in $$( $(KUBECTL) -n "$$ns" get pods -l control-plane=controller-manager -o name 2>/dev/null ); do \
-	    echo "-- $$p --"; \
+	    echo "$(FG_BLUE)>> $(FG_GREEN)-- $$p --$(RESET)"; \
 	    $(KUBECTL) -n "$$ns" logs "$$p" --tail=50 2>/dev/null || true; \
 	  done; \
-	  echo ">>> End of debug info"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)End of debug info$(RESET)"; \
 	  \
-	  echo ">>> Performing clean restart (scale 0 → 1)…"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)Performing clean restart (scale 0 → 1)…$(RESET)"; \
 	  $(KUBECTL) -n "$$ns" scale deploy/"$$dep" --replicas=0; \
-	  echo ">>> Waiting for pods to terminate…"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)Waiting for pods to terminate…$(RESET)"; \
 	  for i in $$(seq 1 24); do \
 	    cnt="$$( $(KUBECTL) -n "$$ns" get pods -l control-plane=controller-manager --no-headers 2>/dev/null | wc -l | tr -d " " )"; \
 	    [ "$$cnt" = "0" ] && break; \
 	    sleep 5; \
 	  done; \
-	  echo ">>> Scaling deployment back up"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)Scaling deployment back up$(RESET)"; \
 	  $(KUBECTL) -n "$$ns" scale deploy/"$$dep" --replicas=1; \
-	  echo ">>> Retrying rollout (210s)…"; \
+	  echo "$(FG_BLUE)>> $(FG_GREEN)Retrying rollout (210s)$(RESET)"; \
 	  $(KUBECTL) -n "$$ns" rollout status deploy/"$$dep" --timeout=210s; \
 	fi; \
 	\
-	echo ">>> Waiting for deployment availability…"; \
+	echo "$(FG_BLUE)>> $(FG_GREEN)Waiting for deployment availability…$(RESET)"; \
 	$(KUBECTL) -n "$$ns" wait --for=condition=Available deploy/"$$dep" --timeout=120s; \
 	\
-	echo ">>> Deployment $$dep successfully rolled out and ready."; \
+	echo "$(FG_BLUE)>> $(FG_GREEN)Deployment $$dep successfully rolled out and ready.$(RESET)"; \
 	'
 endef
 
 .PHONY: common-install
 common-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	@echo ">> installing CRDs into cluster"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing CRDs into cluster$(RESET)"
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) apply -f -
 
 .PHONY: common-uninstall
 common-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	@echo ">> uninstalling CRDs from cluster"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Uninstalling CRDs from cluster$(RESET)"
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: common-deploy
-common-deploy: manifests kustomize cluster load-image install-dependencies install ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	@echo ">> deploying controller to cluster"
+common-deploy: manifests kustomize cluster install-dependencies install ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Deploying controller to cluster$(RESET)"
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	cd config/default && $(KUSTOMIZE) edit set namespace $(OPERATOR_NS)
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f - $(KUBECTL_OUTPUT_REDIRECT)
@@ -483,7 +556,7 @@ common-deploy: manifests kustomize cluster load-image install-dependencies insta
 
 .PHONY: common-undeploy
 common-undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	@echo ">> undeploying controller from cluster"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Undeploying controller from cluster$(RESET)"
 	-$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f - $(KUBECTL_OUTPUT_REDIRECT)
 
 ##@ Dependencies
@@ -528,42 +601,58 @@ GO_TOOLCHAIN ?= go1.25.0
 .PHONY: common-govulncheck
 common-govulncheck: $(GOVULNCHECK) ## Download govulncheck locally if necessary.
 $(GOVULNCHECK): $(LOCALBIN)
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing govulncheck $(GOVULNCHECK_VERSION) to $(GOVULNCHECK)$(RESET)"
 	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
 
 .PHONY: common-kustomize
-common-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
-	@if [ ! -f "$(KUSTOMIZE)" ]; then \
-		echo ">> kustomize not found, installing..."; \
-		$(MAKE) install-kustomize-binary; \
-	fi
-
-install-kustomize-binary: $(LOCALBIN)
-	@echo ">> installing kustomize $(KUSTOMIZE_VERSION) to $(KUSTOMIZE)"
+#common-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
+common-kustomize: ## Download kustomize locally if necessary.
+ifeq (,$(wildcard $(KUSTOMIZE)))
+ifeq (,$(shell which kustomize 2>/dev/null))
+	@echo "$(FG_BLUE)>> $(FG_GREEN)kustomize not found, installing...$(RESET)"; \
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+else
+KUSTOMIZE = $(shell which kustomize)
+endif
+endif
 
 $(KUSTOMIZE): $(LOCALBIN)
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing kustomize $(KUSTOMIZE_VERSION) to $(KUSTOMIZE)$(RESET)"
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+
+.PHONY: common-kind
+common-kind: 
+ifeq (,$(wildcard $(KIND)))
+ifeq (,$(shell which kind 2>/dev/null))
+	@echo "$(FG_BLUE)>> $(FG_GREEN)kind not found, installing...$(RESET)"; \
+	$(call go-install-tool,$(KIND),sigs.k8s.io/kind,$(KIND_VERSION))
+else
+KIND = $(shell which kind)
+endif
+endif
 
 .PHONY: common-controller-gen
 common-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
 $(CONTROLLER_GEN): $(LOCALBIN)
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing controller-gen $(CONTROLLER_TOOLS_VERSION) to $(CONTROLLER_GEN)$(RESET)"
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
 .PHONY: common-envtest
 common-envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing envtest $(ENVTEST_VERSION) to $(ENVTEST)$(RESET)"
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
 .PHONY: common-golangci-lint
 common-golangci-lint: ## Download golangci-lint locally if necessary.
-	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) with Go 1.25..."
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $(GOLANGCI_LINT)$(RESET)"
 	GOTOOLCHAIN=go1.25.0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	mkdir -p $(LOCALBIN)
 	mv $$(go env GOPATH)/bin/golangci-lint $(LOCALBIN)/golangci-lint
 
 .PHONY: common-helmify common-helmify-bin
 common-helmify: manifests kustomize download-helm-mk helmify-bin ## Generate Helm chart from Kustomize manifests
-	@echo "Generating Helm chart..."
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Generating Helm chart...$(RESET)"
 	PATH="$(LOCALBIN):$$PATH" $(MAKE) -f $(HELM_MK) helmify \
 		KUSTOMIZE=$(KUSTOMIZE) \
 		HELM_CHART_NAME=$(HELM_CHART_NAME) \
@@ -573,13 +662,14 @@ common-helmify: manifests kustomize download-helm-mk helmify-bin ## Generate Hel
 
 helmify-bin: $(HELMIFY)
 $(HELMIFY): $(LOCALBIN)
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing helmify $(HELMIFY_VERSION) to $(HELMIFY)$(RESET)"
 	$(call go-install-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify,$(HELMIFY_VERSION))
 
 .PHONY: common-helm
 common-helm: $(HELM)
 $(HELM): $(LOCALBIN)
 ifeq ("$(wildcard $(HELM))","$(LOCALBIN)/helm")
-	@echo "Downloading helm $(HELM_VERSION)" ;\
+	@echo "@echo "$(FG_BLUE)>> $(FG_GREEN)Downloading helm $(HELM_VERSION)$(RESET)" ;\
 		curl -sSLO https://get.helm.sh/helm-$(HELM_VERSION)-linux-amd64.tar.gz ;\
 		tar -zxvf helm-$(HELM_VERSION)-linux-amd64.tar.gz ;\
 		mv linux-amd64/helm $(HELM) ;\
@@ -590,6 +680,7 @@ endif
 .PHONY: common-go-test-coverage
 common-go-test-coverage: $(GOTESTCOVERAGE) ## Download go-test-coverage locally if necessary.
 $(GOTESTCOVERAGE): $(LOCALBIN)
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing go-test-coverage $(GOTESTCOVERAGE_VERSION) to $(GOTESTCOVERAGE)$(RESET)"
 	$(call go-install-tool,$(GOTESTCOVERAGE),github.com/vladopajic/go-test-coverage/v2,$(GOTESTCOVERAGE_VERSION))
 
 #.PHONY: common-tenant-crd-install
@@ -600,7 +691,7 @@ $(GOTESTCOVERAGE): $(LOCALBIN)
 
 .PHONY: common-install-prometheus-operator
 common-install-prometheus-operator:
-	@echo "Installing/ensuring Prometheus Operator (server-side apply)…"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring Prometheus Operator (server-side apply)…$(RESET)"
 	$(KUBECTL) apply --server-side \
 	  --field-manager=po-installer \
 	  -f $(PO_BUNDLE_URL) $(KUBECTL_OUTPUT_REDIRECT)
@@ -615,17 +706,17 @@ common-install-prometheus-operator:
 	  crd/prometheusrules.monitoring.coreos.com \
 	  crd/servicemonitors.monitoring.coreos.com \
 	  crd/thanosrulers.monitoring.coreos.com $(KUBECTL_OUTPUT_REDIRECT)
-	@echo "Prometheus Operator ensured."
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Prometheus Operator ensured.$(RESET)"
 
 .PHONY: common-uninstall-prometheus-operator
 common-uninstall-prometheus-operator:
-	@echo "Uninstalling Prometheus Operator..."
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Uninstalling Prometheus Operator...$(RESET)"
 	-$(call k8s-tool,delete,prometheus-operator/prometheus-operator,$(PROMETHEUS_OPERATOR_VERSION),bundle.yaml)
-	@echo "Prometheus Operator uninstall completed"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Prometheus Operator uninstall completed.$(RESET)"
 
 .PHONY: common-install-certmanager
 common-install-certmanager:
-	@echo "Installing/ensuring cert-manager (server-side apply)…"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring cert-manager (server-side apply)…$(RESET)"
 	$(KUBECTL) apply --server-side \
 	  --force-conflicts \
 	  --field-manager=cm-installer \
@@ -641,22 +732,42 @@ common-install-certmanager:
 	$(KUBECTL) -n cert-manager rollout status \
 	  deploy/cert-manager-webhook \
 	  --timeout=300s $(KUBECTL_OUTPUT_REDIRECT)
-	@echo "cert-manager ensured."
+	@echo "$(FG_BLUE)>> $(FG_GREEN)cert-manager ensured.$(RESET)"
 
 .PHONY: common-uninstall-certmanager
 common-uninstall-certmanager:
-	@echo "Uninstalling Cert Manager..."
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Uninstalling Cert Manager...$(RESET)"
 	-$(call k8s-tool,delete,jetstack/cert-manager,$(CERTMANAGER_VERSION),cert-manager.yaml)
-	@echo "Cert Manager uninstall completed"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Cert Manager uninstall completed.$(RESET)"
 
 .PHONY: common-install-gateway
 common-install-gateway:
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing gateway-api $(GATEWAY_VERSION)$(RESET)"
 	$(call k8s-tool,create,kubernetes-sigs/gateway-api,$(GATEWAY_VERSION),standard-install.yaml)
 
 .PHONY: common-uninstall-gateway
 common-uninstall-gateway:
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Uninstalling gateway-api $(GATEWAY_VERSION)$(RESET)"
 	$(call k8s-tool,delete,kubernetes-sigs/gateway-api,$(GATEWAY_VERSION),standard-install.yaml)
 
+# install-dependency will 'go install' any package with custom target and name of binary,
+# if it doesn't exist locally or in PATH
+# Requires that the dependency's version is defined in a variable named <DEPENDENCY>_VERSION (e.g. KIND_VERSION)
+# $1 - variable name of dependency (e.g. KIND)
+# $2 - name of binary to check for existence (e.g. kind)
+define install-dependency
+package=$($(1))
+ifeq (,$(wildcard $(package)))
+ifeq (, $(shell which $(2) 2>/dev/null))
+	$(MAKE) common-$(1)
+else
+	echo "$(FG_BLUE)>> $(FG_GREEN)$(2) found in PATH, skipping installation of $(1) dependency$(RESET)" ;
+endif
+else
+	echo "$(FG_BLUE)>> $(FG_GREEN)$(2) found locally, skipping installation of $(1) dependency$(RESET)" ;
+endif
+$$(eval $$package = $(shell which $(2)))
+endef
 
 # k8s-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - action taken (create/apply/replace/delete)
@@ -668,30 +779,13 @@ define k8s-tool
 set -e; \
 package=https://github.com/$(2)/releases/download/$(3)/$(4) ;\
 if [ "$(1)" = "delete" ]; then \
-	echo "Running: $(KUBECTL) delete --ignore-not-found=true -f $${package}" ; \
+	echo "$(FG_BLUE)>> $(FG_GREEN)Running: $(KUBECTL) delete --ignore-not-found=true -f $${package}$(RESET)" ; \
 	$(KUBECTL) delete --ignore-not-found=true -f $${package} $(KUBECTL_OUTPUT_REDIRECT) ;\
 else \
-	echo "Running: $(KUBECTL) $(1) -f $${package}" ; \
+	echo "$(FG_BLUE)>> $(FG_GREEN)Running: $(KUBECTL) $(1) -f $${package}$(RESET)" ; \
 	$(KUBECTL) $(1) -f $${package} $(KUBECTL_OUTPUT_REDIRECT) ;\
 fi \
 }
-endef
-
-# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
-# $1 - target path with name of binary
-# $2 - package url which can be installed
-# $3 - specific version of package
-define go-install-tool
-@if [ ! -f "$(1)-$(3)" ]; then \
-	echo "Installing $(2)@$(3)..."; \
-	set -e; \
-	package=$(2)@$(3); \
-	rm -f $(1) || true; \
-	GOBIN=$(LOCALBIN) go install $${package}; \
-	mv $(1) $(1)-$(3); \
-	echo "Installation completed successfully"; \
-fi
-@ln -sf $(1)-$(3) $(1)
 endef
 
 .PHONY: common-operator-sdk
@@ -720,7 +814,7 @@ ifeq (,$(shell which opm 2>/dev/null))
 	set -e ;\
 	mkdir -p $(dir $(OPM)) ;\
 	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSLo $(OPM) https://github.com/operator-framework/operator-registry/releases/download/v1.23.0/$${OS}-$${ARCH}-opm ;\
+	curl -sSLo $(OPM) https://github.com/operator-framework/operator-registry/releases/download/$(OPM_VERSION)/$${OS}-$${ARCH}-opm ;\
 	chmod +x $(OPM) ;\
 	}
 else
@@ -763,6 +857,7 @@ endif
 
 .PHONY: common-bundle
 common-bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Generating bundle manifests and metadata$(RESET)"
 	$(OPERATOR_SDK) generate kustomize manifests -q
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
 	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
@@ -770,15 +865,18 @@ common-bundle: manifests kustomize operator-sdk ## Generate bundle manifests and
 
 .PHONY: common-bundle-build
 common-bundle-build: ## Build the bundle image.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Building bundle image $(BUNDLE_IMG)$(RESET)"
 	docker build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
 
 .PHONY: common-bundle-push
 common-bundle-push: ## Push the bundle image.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Pushing bundle image $(BUNDLE_IMG)$(RESET)"
 	$(MAKE) docker-push IMG=$(BUNDLE_IMG)
 
 # Render bundle to the catalog index.
 .PHONY: common-catalog-render
 common-catalog-render: opm yq ## Render bundle to catalog index.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Rendering catalog index with bundle images$(RESET)"
 	bash generate-catalog-index.sh $(DOCKER_REPO_BASE) $(OPERATOR_NAME) $(CATALOG_DIR_PATH) $(VERSION) $(GIT_TAG)
 
 # Build a catalog image by adding bundle images to an empty catalog using the operator package manager tool, 'opm'.
@@ -786,16 +884,19 @@ common-catalog-render: opm yq ## Render bundle to catalog index.
 # https://github.com/operator-framework/community-operators/blob/7f1438c/docs/packaging-operator.md#updating-your-existing-operator
 .PHONY: common-catalog-build
 common-catalog-build: opm ## Build a catalog image.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Building catalog image $(CATALOG_IMG) with bundles: $(BUNDLE_IMGS)$(RESET)"
 	$(OPM) index add --container-tool docker --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
 
 # Push the catalog image.
 .PHONY: common-catalog-push
 common-catalog-push: ## Push a catalog image.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Pushing catalog image $(CATALOG_IMG)$(RESET)"
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
 
 # Push the catalog image.
 .PHONY: common-publish
 common-publish: ## Build and publish operator.
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Publishing operator: building and pushing bundle and catalog images$(RESET)"
 	echo $(BUNDLE_IMGS)
 	$(MAKE) manifests build docker-build docker-push
 	rm -f bin/kustomize
