@@ -19,6 +19,13 @@ jobs:
       with:
         go-version: 1.25.0
 
+    - name: Verify code
+      id: verify
+      uses: stakater/.github/.github/actions/operator/verify@main
+      with:
+        ENABLE_LINTING: false
+        ENABLE_UNIT_TESTS: true
+
     - name: Check Code Coverage
       id: coverage
       uses: stakater/.github/.github/actions/operator/coverage@feature/code-coverage
