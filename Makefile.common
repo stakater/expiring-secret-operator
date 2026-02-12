@@ -168,7 +168,7 @@ TARGET_WIDTH ?= 22
 # The '-7' accounts for the spacing and formatting characters between
 # the target and description.
 #DESC_MAX_LEN := $(shell echo ${MAX_LINE_LENGTH}-${TARGET_WIDTH}-7 | bc)
-DESC_MAX_LEN := $(shell echo ${MAX_LINE_LENGTH}-${TARGET_WIDTH}-2 | bc)
+DESC_MAX_LEN := $(shell echo $$(($(MAX_LINE_LENGTH)-$(TARGET_WIDTH)-2)))
 
 # This is used to split long descriptions into multiple lines with proper 
 # indentation, without breaking words in half.
@@ -262,7 +262,7 @@ common-coverage: $(GOTEST_DIR)
 common-check-coverage: common-go-test-coverage
 	@echo "$(FG_BLUE)>> $(FG_GREEN)summarizing coverage$(RESET)"
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
-	$(GOBIN)/go-test-coverage --config=./.github/.testcoverage-local.yml
+	$(GOTESTCOVERAGE) --config=./.github/.testcoverage-local.yml
 
 .PHONY: common-test-e2e
 common-test-e2e: ## Run e2e tests with the Go testing framework.
@@ -619,32 +619,16 @@ $(GOVULNCHECK): $(LOCALBIN)
 	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
 
 .PHONY: common-kustomize
-#common-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
-common-kustomize: ## Download kustomize locally if necessary.
-ifeq (,$(wildcard $(KUSTOMIZE)))
-ifeq (,$(shell which kustomize 2>/dev/null))
-	@echo "$(FG_BLUE)>> $(FG_GREEN)kustomize not found, installing...$(RESET)"; \
-	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
-else
-KUSTOMIZE = $(shell which kustomize)
-endif
-endif
-
+common-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
-	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing kustomize $(KUSTOMIZE_VERSION) to $(KUSTOMIZE)$(RESET)"
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring kustomize $(KUSTOMIZE_VERSION) to $(KUSTOMIZE)$(RESET)"
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
 .PHONY: common-kind
-common-kind: ## Download kind locally if necessary.
+common-kind: $(KIND) ## Download kind locally if necessary.
 $(KIND): $(LOCALBIN)
-ifeq (,$(wildcard $(KIND)))
-ifeq (,$(shell which kind 2>/dev/null))
-	@echo "$(FG_BLUE)>> $(FG_GREEN)kind not found, installing...$(RESET)"; \
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring kind $(KIND_VERSION) to $(KIND)$(RESET)"
 	$(call go-install-tool,$(KIND),sigs.k8s.io/kind,$(KIND_VERSION))
-else
-KIND = $(shell which kind)
-endif
-endif
 
 .PHONY: common-controller-gen
 common-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
@@ -659,11 +643,18 @@ $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
 .PHONY: common-golangci-lint
-common-golangci-lint: ## Download golangci-lint locally if necessary.
+common-golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
+$(GOLANGCI_LINT): $(LOCALBIN)
 	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring golangci-lint $(GOLANGCI_LINT_VERSION) to $(GOLANGCI_LINT)$(RESET)"
-	GOTOOLCHAIN=go1.25.0 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
-	mkdir -p $(LOCALBIN)
-	mv $$(go env GOPATH)/bin/golangci-lint $(LOCALBIN)/golangci-lint
+	@if [ -f "$(GOLANGCI_LINT)" ]; then \
+		echo "$(FG_BLUE)>> $(FG_GREEN)golangci-lint already exists at $(GOLANGCI_LINT)$(RESET)" ;\
+	elif command -v golangci-lint >/dev/null 2>&1; then \
+		echo "$(FG_BLUE)>> $(FG_GREEN)golangci-lint found in PATH, creating symlink$(RESET)"; \
+		ln -sf $$(which golangci-lint) $(GOLANGCI_LINT); \
+	else \
+		echo "$(FG_BLUE)>> $(FG_YELLOW)golangci-lint not found, installing $(GOLANGCI_LINT_VERSION)$(RESET)" ;\
+		GOTOOLCHAIN=go1.25.0 GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) ;\
+	fi
 
 .PHONY: common-helmify common-helmify-bin
 common-helmify: manifests kustomize download-helm-mk helmify-bin ## Generate Helm chart from Kustomize manifests
@@ -697,12 +688,6 @@ common-go-test-coverage: $(GOTESTCOVERAGE) ## Download go-test-coverage locally 
 $(GOTESTCOVERAGE): $(LOCALBIN)
 	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring go-test-coverage $(GOTESTCOVERAGE_VERSION) to $(GOTESTCOVERAGE)$(RESET)"
 	$(call go-install-tool,$(GOTESTCOVERAGE),github.com/vladopajic/go-test-coverage/v2,$(GOTESTCOVERAGE_VERSION))
-
-#.PHONY: common-tenant-crd-install
-#common-tenant-crd-install:
-#	@echo "Installing Tenant CRD"
-#	$(KUBECTL) apply -f hack/e2e/tenant-crd.yaml
-#	$(KUBECTL) wait --for=condition=Established crd/tenants.tenantoperator.stakater.com --timeout=60s
 
 .PHONY: common-install-prometheus-operator
 common-install-prometheus-operator:
@@ -765,23 +750,31 @@ common-uninstall-gateway:
 	@echo "$(FG_BLUE)>> $(FG_GREEN)Uninstalling gateway-api $(GATEWAY_VERSION)$(RESET)"
 	$(call k8s-tool,delete,kubernetes-sigs/gateway-api,$(GATEWAY_VERSION),standard-install.yaml)
 
-# install-dependency will 'go install' any package with custom target and name of binary,
-# if it doesn't exist locally or in PATH
-# Requires that the dependency's version is defined in a variable named <DEPENDENCY>_VERSION (e.g. KIND_VERSION)
-# $1 - variable name of dependency (e.g. KIND)
-# $2 - name of binary to check for existence (e.g. kind)
-define install-dependency
-package=$($(1))
-ifeq (,$(wildcard $(package)))
-ifeq (, $(shell which $(2) 2>/dev/null))
-	$(MAKE) common-$(1)
-else
-	echo "$(FG_BLUE)>> $(FG_GREEN)$(2) found in PATH, skipping installation of $(1) dependency$(RESET)" ;
-endif
-else
-	echo "$(FG_BLUE)>> $(FG_GREEN)$(2) found locally, skipping installation of $(1) dependency$(RESET)" ;
-endif
-$$(eval $$package = $(shell which $(2)))
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# It first checks if the binary exists locally, then checks if it exists in PATH
+# If found in PATH, it creates a symlink to the system version
+# If not found anywhere, it installs and creates a versioned binary
+# $1 - target path with name of binary
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@binary_name=$$(basename "$(1)"); \
+if [ -f "$(1)" ]; then \
+	echo "$(FG_BLUE)>> $(FG_GREEN)$${binary_name} already exists at $(1)$(RESET)" ;\
+elif command -v $${binary_name} >/dev/null 2>&1; then \
+	echo "$(FG_BLUE)>> $(FG_GREEN)$${binary_name} found in PATH, creating symlink$(RESET)"; \
+	ln -sf $$(which $${binary_name}) $(1); \
+else \
+	[ -f "$(1)-$(3)" ] || { \
+		set -e; \
+		package=$(2)@$(3) ;\
+		echo "$(FG_BLUE)>> $(FG_YELLOW)$${binary_name} not found, installing $${package}$(RESET)" ;\
+		rm -f $(1) || true ;\
+		GOBIN=$(LOCALBIN) go install $${package} ;\
+		mv $(1) $(1)-$(3) ;\
+	} ;\
+	ln -sf $(1)-$(3) $(1) ;\
+fi
 endef
 
 # k8s-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
