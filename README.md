@@ -147,33 +147,91 @@ make fmt vet
 
 ```mermaid
 graph TD
-    SECRET@{ shape: doc, label: "Secret"}
-
-    subgraph MCR[Monitor CR]
-      direction TD
-      MCRRW[Reconciler]
-      MCRPAR[Parse label]
-
-      MCRSTATUS[\Status\]
-      MCRMETRIC[\Metrics\]
-
-      MCRINPUT[\Input\]
-
-      MCRRW --> MCRPAR
-      MCRRW <-- Watches --> MCRINPUT
-      MCRPAR -->|Update| MCRSTATUS
-      MCRPAR -->|Expose| MCRMETRIC
+    SECRET[Secret with validUntil label]
+    MONITOR_CR[Monitor CR]
+    
+    subgraph OPERATOR[Expiring Secrets Operator]
+        RECONCILER[Reconciler]
+        PARSER[Parse expiration date]
+        STATUS_UPDATER[Update CR Status]
+        METRICS_EXPORTER[Export Prometheus Metrics]
+        
+        RECONCILER --> PARSER
+        PARSER --> STATUS_UPDATER
+        PARSER --> METRICS_EXPORTER
     end
+    
+    subgraph MONITORING[Monitoring Stack]
+        SM[ServiceMonitor] 
+        PROM[Prometheus]
+        AM[Alertmanager]
+        
+        SM --> PROM
+        PROM --> AM
+    end
+    
+    %% Watch relationships
+    SECRET <-.->|watches| RECONCILER
+    MONITOR_CR -.->|watches| RECONCILER
+    
+    %% Data flow
+    SECRET -->|references| MONITOR_CR
+    STATUS_UPDATER -->|status updates| MONITOR_CR
+    METRICS_EXPORTER -->|/metrics| SM
+```
 
-    SECRET --> MCRINPUT
+## Reconciliation Flow
 
-    SM[[ServiceMonitor]]
-    PROM[[Prometheus]]
-    AM[[Alertmanager]]
-
-    MCRMETRIC --> SM
-
-    SM --> PROM --> AM
+```mermaid
+flowchart TD
+    START([Reconcile Event]) --> GET_MONITOR{Get Monitor CR}
+    
+    GET_MONITOR -->|Not Found| CLEANUP[Clean up metrics]
+    CLEANUP --> END_SUCCESS([Success - Monitor deleted])
+    
+    GET_MONITOR -->|Found| DEFAULTS[Apply default alert thresholds]
+    DEFAULTS --> GET_SECRET{Get referenced Secret}
+    
+    GET_SECRET -->|Not Found| ERROR_SECRET[Status: Error - Secret not found]
+    ERROR_SECRET --> END_ERROR([Error - Requeue])
+    
+    GET_SECRET -->|Found| CHECK_LABEL{Has validUntil label?}
+    
+    CHECK_LABEL -->|No| ERROR_LABEL[Status: Error - Missing label]
+    ERROR_LABEL --> END_ERROR
+    
+    CHECK_LABEL -->|Yes| PARSE_DATE{Parse date format?}
+    
+    PARSE_DATE -->|Invalid| ERROR_PARSE[Status: Error - Invalid date format]
+    ERROR_PARSE --> END_ERROR
+    
+    PARSE_DATE -->|Valid| CALC_REMAINING[Calculate seconds remaining]
+    CALC_REMAINING --> DETERMINE_STATE{Determine state}
+    
+    DETERMINE_STATE -->|<= 0 days| STATE_EXPIRED[Status: Expired] 
+    DETERMINE_STATE -->|<= Critical days| STATE_CRITICAL[Status: Critical]
+    DETERMINE_STATE -->|<= Warning days| STATE_WARNING[Status: Warning] 
+    DETERMINE_STATE -->|<= Info days| STATE_INFO[Status: Info]
+    DETERMINE_STATE -->|> Info days| STATE_VALID[Status: Valid]
+    
+    STATE_EXPIRED --> UPDATE_METRICS[Update Prometheus metrics]
+    STATE_CRITICAL --> UPDATE_METRICS
+    STATE_WARNING --> UPDATE_METRICS
+    STATE_INFO --> UPDATE_METRICS
+    STATE_VALID --> UPDATE_METRICS
+    
+    UPDATE_METRICS --> UPDATE_STATUS[Update Monitor status]
+    UPDATE_STATUS --> REQUEUE[Requeue after 1 minute]
+    REQUEUE --> END_SUCCESS
+    
+    %% Styling
+    classDef errorPath fill:#ffcccc
+    classDef successPath fill:#ccffcc
+    classDef processPath fill:#cce5ff
+    
+    class ERROR_SECRET,ERROR_LABEL,ERROR_PARSE,END_ERROR errorPath
+    class STATE_EXPIRED,STATE_CRITICAL,STATE_WARNING,STATE_INFO,STATE_VALID,END_SUCCESS successPath
+    class DEFAULTS,CALC_REMAINING,UPDATE_METRICS,UPDATE_STATUS,REQUEUE processPath
 ```
 
 ## Requirements

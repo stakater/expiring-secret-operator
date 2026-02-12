@@ -227,7 +227,8 @@ func (r *MonitorReconciler) updateStatus(ctx context.Context,
 	state expiringsecretv1alpha1.MonitorState,
 	message string,
 	expiresAt *metav1.Time,
-	secondsRemaining *int64) (ctrl.Result, error) {
+	secondsRemaining *int64,
+) (ctrl.Result, error) {
 
 	logger := log.FromContext(ctx)
 	now := metav1.NewTime(time.Now())
@@ -288,6 +289,7 @@ func (r *MonitorReconciler) cleanupMetrics(ctx context.Context, ns types.Namespa
 
 // mapSecretToMonitor maps a Secret to Monitor objects that reference it
 func (r *MonitorReconciler) mapSecretToMonitor(ctx context.Context, obj client.Object) []ctrl.Request {
+	logger := log.FromContext(ctx)
 	secret := obj.(*corev1.Secret)
 
 	// Find all monitors that reference this secret
@@ -300,6 +302,7 @@ func (r *MonitorReconciler) mapSecretToMonitor(ctx context.Context, obj client.O
 	for _, monitor := range monitorList.Items {
 		secretNamespace := monitor.Spec.SecretRef.Namespace
 		if secretNamespace == "" {
+			logger.Info("SecretRef namespace is empty, defaulting to Monitor namespace", "monitorNamespace", monitor.Namespace)
 			secretNamespace = monitor.Namespace
 		}
 

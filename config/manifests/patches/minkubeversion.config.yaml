@@ -1,0 +1,4 @@
+- op: add
+  path: "/spec/minKubeVersion"
+  value:
+    1.21.0

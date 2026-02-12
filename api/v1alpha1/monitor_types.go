@@ -50,16 +50,17 @@ const (
 type MonitorSpec struct {
 	// Service that secret generated the secret content (e.g., docker.io, quay.io)
 	// +kubebuilder:validation:Required
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors="urn:alm:descriptor:com.tectonic.ui:text",displayName="Service that generated the secret content"
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Service that generated the secret content",xDescriptors="urn:alm:descriptor:com.tectonic.ui:text"
 	Service string `json:"service"`
 
 	// SecretRef is a reference to the Kubernetes Secret containing the PAT
 	// +kubebuilder:validation:Required
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:io.kubernetes:Secret","urn:alm:descriptor:com.tectonic.ui:fieldDependency:secretRef:secret"}
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Secret Reference",xDescriptors={"urn:alm:descriptor:io.kubernetes:Secret"}
 	SecretRef SecretReference `json:"secretRef"`
 
 	// AlertThresholds defines when to trigger different alert levels
 	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Alert Thresholds",xDescriptors="urn:alm:descriptor:com.tectonic.ui:advanced"
 	AlertThresholds *AlertThresholds `json:"alertThresholds,omitempty"`
 }
 
@@ -67,13 +68,13 @@ type MonitorSpec struct {
 type SecretReference struct {
 	// Name is the name of the secret
 	// +kubebuilder:validation:Required
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors="urn:alm:descriptor:io.kubernetes:Secret"
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Name of the secret to monitor",xDescriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	Name string `json:"name"`
 
 	// Namespace is the namespace of the secret
 	// If empty, defaults to the same namespace as the Monitor
 	// +optional
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors="urn:alm:descriptor:io.kubernetes:Namespace"
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Namespace of the secret to monitor",xDescriptors="urn:alm:descriptor:io.kubernetes:Namespace"
 	Namespace string `json:"namespace,omitempty"`
 }
 
@@ -83,21 +84,21 @@ type AlertThresholds struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	// +default=30
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors="urn:alm:descriptor:com.tectonic.ui:number",displayName="Info alert threshold (days before expiration)"
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Info alert threshold (days before expiration)",xDescriptors="urn:alm:descriptor:com.tectonic.ui:number"
 	InfoDays int32 `json:"infoDays,omitempty"`
 
 	// WarningDays is the number of days before expiration to trigger warning alerts
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	// +default=14
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors="urn:alm:descriptor:com.tectonic.ui:number",displayName="Warning alert threshold (days before expiration)"
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Warning alert threshold (days before expiration)",xDescriptors="urn:alm:descriptor:com.tectonic.ui:number"
 	WarningDays int32 `json:"warningDays,omitempty"`
 
 	// CriticalDays is the number of days before expiration to trigger critical alerts
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	// +default=7
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors="urn:alm:descriptor:com.tectonic.ui:number",displayName="Critical alert threshold (days before expiration)"
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Critical alert threshold (days before expiration)",xDescriptors="urn:alm:descriptor:com.tectonic.ui:number"
 	CriticalDays int32 `json:"criticalDays,omitempty"`
 }
 
@@ -120,24 +121,28 @@ func (a *AlertThresholds) ApplyDefaults() {
 type MonitorStatus struct {
 	// ExpiresAt is the expiration timestamp of the monitored secret
 	// +kubebuilder:validation:Optional
+	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Expiration timestamp",xDescriptors="urn:alm:descriptor:com.tectonic.ui:text"
 	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 
 	// SecondsRemaining is the number of seconds until expiration
 	// +kubebuilder:validation:Optional
+	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Seconds until expiration",xDescriptors="urn:alm:descriptor:com.tectonic.ui:number"
 	SecondsRemaining *int64 `json:"secondsRemaining,omitempty"`
 
 	// LastChecked is the timestamp when the secret was last checked
 	// +kubebuilder:validation:Optional
+	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Last check timestamp",xDescriptors="urn:alm:descriptor:com.tectonic.ui:text"
 	LastChecked *metav1.Time `json:"lastChecked,omitempty"`
 
 	// State represents the current state of the monitor
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:Enum=Valid;Info;Warning;Critical;Expired;Error
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:select:Valid","urn:alm:descriptor:com.tectonic.ui:select:Info","urn:alm:descriptor:com.tectonic.ui:select:Warning","urn:alm:descriptor:com.tectonic.ui:select:Critical","urn:alm:descriptor:com.tectonic.ui:select:Expired","urn:alm:descriptor:com.tectonic.ui:select:Error"},displayName="Current state"
+	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Current state",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:select:Valid","urn:alm:descriptor:com.tectonic.ui:select:Info","urn:alm:descriptor:com.tectonic.ui:select:Warning","urn:alm:descriptor:com.tectonic.ui:select:Critical","urn:alm:descriptor:com.tectonic.ui:select:Expired","urn:alm:descriptor:com.tectonic.ui:select:Error"}
 	State MonitorState `json:"state,omitempty"`
 
 	// Message provides additional information about the current state
 	// +kubebuilder:validation:Optional
+	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Status message",xDescriptors="urn:alm:descriptor:com.tectonic.ui:text"
 	Message string `json:"message,omitempty"`
 
 	// Conditions represent the latest available observations of the monitor's state
@@ -148,11 +153,15 @@ type MonitorStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=mon
-// +kubebuilder:printcolumn:name="Registry",type="string",JSONPath=".spec.registry"
+// +kubebuilder:printcolumn:name="Service",type="string",JSONPath=".spec.service"
 // +kubebuilder:printcolumn:name="Secret",type="string",JSONPath=".spec.secretRef.name"
 // +kubebuilder:printcolumn:name="State",type="string",JSONPath=".status.state"
 // +kubebuilder:printcolumn:name="Expires At",type="date",JSONPath=".status.expiresAt"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +operator-sdk:csv:customresourcedefinitions:displayName="Expiring Secrets Monitor"
+// This annotation provides a hint for OLM which resources are managed by Monitor kind.
+// It's not mandatory to list all resources.
+// +operator-sdk:csv:customresourcedefinitions:resources={{Pod,v1,""},{Deployment,apps/v1,""},{ServiceAccount,v1,""},{Service,v1,""},{Secret,v1,""}}
 
 // Monitor is the Schema for the monitors API
 type Monitor struct {

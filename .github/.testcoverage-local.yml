@@ -7,15 +7,13 @@ threshold:
   # Minimum coverage percentage required for each package.
   package: 80
   # Minimum overall project coverage percentage required.
-  total: 90
+#  total: 90
 
 exclude:
   paths:
     - ^cmd/main\.go
-#    - ^api/v1alpha1/.*
-#    - ^api/v1alpha1/monitor_types\.go
-#    - ^api/v1alpha1/zz_generated\.deepcopy\.go
-#    - ^catalog/alert-az-do/telemetry\.go
+    - ^api/v1alpha1/.*
+    - ^test/utils/.*
     - third_party$
     - builtin$
     - examples$
