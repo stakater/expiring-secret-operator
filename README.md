@@ -146,34 +146,35 @@ make fmt vet
 ## Architecture
 
 ```mermaid
-graph TD
-    SECRET@{ shape: doc, label: "Secret"}
+graph TD;
+    SECRET@{ shape: doc, label: "Secret"};
 
-    subgraph MCR[Monitor CR]
-      direction TD
-      MCRRW[Reconciler]
-      MCRPAR[Parse label]
+    subgraph MCR[Monitor CR];
+      direction TD;
 
-      MCRSTATUS[\Status\]
-      MCRMETRIC[\Metrics\]
+      MCRRW[Reconciler];
+      MCRPAR[Parse label];
 
-      MCRINPUT[\Input\]
+      MCRSTATUS[\Status\];
+      MCRMETRIC[\Metrics\];
 
-      MCRRW --> MCRPAR
-      MCRRW <-- Watches --> MCRINPUT
-      MCRPAR -->|Update| MCRSTATUS
-      MCRPAR -->|Expose| MCRMETRIC
-    end
+      MCRINPUT[\Input\];
 
-    SECRET --> MCRINPUT
+      MCRRW --> MCRPAR;
+      MCRRW <-- Watches --> MCRINPUT;
+      MCRPAR -->|Update| MCRSTATUS;
+      MCRPAR -->|Expose| MCRMETRIC;
+    end;
 
-    SM[[ServiceMonitor]]
-    PROM[[Prometheus]]
-    AM[[Alertmanager]]
+    SECRET --> MCRINPUT;
 
-    MCRMETRIC --> SM
+    SM[[ServiceMonitor]];
+    PROM[[Prometheus]];
+    AM[[Alertmanager]];
 
-    SM --> PROM --> AM
+    MCRMETRIC --> SM;
+
+    SM --> PROM --> AM;
 ```
 
 ## Requirements
