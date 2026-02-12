@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	rest "k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -47,7 +48,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(clientgoscheme.AddToScheme(scheme)).NotTo(HaveOccurred())
 			Expect(expiringsecretv1alpha1.AddToScheme(scheme)).NotTo(HaveOccurred())
 
-			mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+			mgr, err := ctrl.NewManager(&rest.Config{}, ctrl.Options{
 				Scheme: scheme,
 			})
 			Expect(err).NotTo(HaveOccurred())
