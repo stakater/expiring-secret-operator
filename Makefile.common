@@ -250,12 +250,12 @@ common-vet: ## Run go vet against code.
 common-test: manifests generate fmt vet envtest ## Run tests with the Go testing framework.
 	@echo "$(FG_BLUE)>> $(FG_GREEN)running all tests$(RESET)"
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
-	go test $(GOOPTS) $(PKGS) -coverprofile cover.out -covermode=atomic -coverpkg=$(PKGS) $(TEST_ARGS)
+	go test $(GOOPTS) $(PKGS) -coverprofile cover.out -covermode=atomic -coverpkg=$(ALL_PKGS) $(TEST_ARGS)
 
 .PHONY: common-check-coverage
-common-check-coverage: common-go-test-coverage ## Check code coverage against the defined threshold in .testcoverage-local.yml
+common-check-coverage: gotestcoverage test ## Check code coverage against the defined threshold in .testcoverage-local.yml
 	@echo "$(FG_BLUE)>> $(FG_GREEN)summarizing coverage$(RESET)"
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	@KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 	$(GOTESTCOVERAGE) --config=./.github/.testcoverage-local.yml
 
 .PHONY: common-test-e2e
@@ -606,6 +606,13 @@ GATEWAY_VERSION ?= v1.3.0
 
 GO_TOOLCHAIN ?= go1.25.0
 
+
+.PHONY: common-gotestcoverage
+common-gotestcoverage: $(GOTESTCOVERAGE) ## Download go-test-coverage locally if necessary.
+$(GOTESTCOVERAGE): $(LOCALBIN)
+	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring go-test-coverage $(GOTESTCOVERAGE_VERSION) to $(GOTESTCOVERAGE)$(RESET)"
+	$(call go-install-tool,$(GOTESTCOVERAGE),github.com/vladopajic/go-test-coverage/v2,$(GOTESTCOVERAGE_VERSION))
+
 .PHONY: common-govulncheck
 common-govulncheck: $(GOVULNCHECK) ## Download govulncheck locally if necessary.
 $(GOVULNCHECK): $(LOCALBIN)
@@ -676,12 +683,6 @@ ifeq ("$(wildcard $(HELM))","$(LOCALBIN)/helm")
 		rm -rf linux-amd64 helm-$(HELM_VERSION)-linux-amd64.tar.gz ;\
 		chmod +x $(HELM) ;
 endif
-
-.PHONY: common-go-test-coverage
-common-go-test-coverage: $(GOTESTCOVERAGE) ## Download go-test-coverage locally if necessary.
-$(GOTESTCOVERAGE): $(LOCALBIN)
-	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing/ensuring go-test-coverage $(GOTESTCOVERAGE_VERSION) to $(GOTESTCOVERAGE)$(RESET)"
-	$(call go-install-tool,$(GOTESTCOVERAGE),github.com/vladopajic/go-test-coverage/v2,$(GOTESTCOVERAGE_VERSION))
 
 .PHONY: common-install-prometheus-operator
 common-install-prometheus-operator:
@@ -754,7 +755,7 @@ common-uninstall-gateway:
 define go-install-tool
 @binary_name=$$(basename "$(1)"); \
 if [ -f "$(1)" ]; then \
-	echo "$(FG_BLUE)>> $(FG_GREEN)$${binary_name} already exists at $(1)$(RESET)" ;\
+	echo "$(FG_BLUE)>> $(FG_GREEN)$${binary_name} ensured.$(RESET)" ;\
 elif command -v $${binary_name} >/dev/null 2>&1; then \
 	echo "$(FG_BLUE)>> $(FG_GREEN)$${binary_name} found in PATH, creating symlink$(RESET)"; \
 	ln -sf $$(which $${binary_name}) $(1); \

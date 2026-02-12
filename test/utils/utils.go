@@ -23,6 +23,15 @@ import (
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+
+	expiringsecretv1alpha1 "github.com/stakater/expiring-secrets/api/v1alpha1"
+)
+
+var (
+	ValidUntilLabel = "expiringsecret.stakater.com/validUntil"
 )
 
 func Log(format string, a ...any) {
@@ -31,6 +40,48 @@ func Log(format string, a ...any) {
 
 func WarnError(err error) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "warning: %v\n", err)
+}
+
+func GenerateSecret(ns types.NamespacedName, validUntil string, payload []byte) *corev1.Secret {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ns.Name,
+			Namespace: ns.Namespace,
+			Labels:    map[string]string{},
+		},
+		Data: map[string][]byte{
+			"token": payload,
+		},
+	}
+
+	if validUntil != "" {
+		secret.Labels[ValidUntilLabel] = validUntil
+	}
+
+	return secret
+}
+
+func GenerateMonitor(
+	ns types.NamespacedName,
+	service string,
+	secretRef types.NamespacedName,
+	alertThresholds *expiringsecretv1alpha1.AlertThresholds,
+) *expiringsecretv1alpha1.Monitor {
+	monitor := &expiringsecretv1alpha1.Monitor{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ns.Name,
+			Namespace: ns.Namespace,
+		},
+		Spec: expiringsecretv1alpha1.MonitorSpec{
+			Service: service,
+			SecretRef: expiringsecretv1alpha1.SecretReference{
+				Name:      secretRef.Name,
+				Namespace: secretRef.Namespace,
+			},
+			AlertThresholds: alertThresholds,
+		},
+	}
+	return monitor
 }
 
 // WaitForStatus waits until the specified condition is met for the given resource,
@@ -58,34 +109,6 @@ func WaitForStatus(condition, resource, namespace, timeout string) error {
 	_, err := Run(cmd)
 	return err
 }
-
-/*
-func CheckOperatorReady(ns types.NamespacedName) error {
-	// Get controller pod name
-	cmd := exec.Command("kubectl", "get", "pods",
-		"-l", "control-plane=controller-manager",
-		"-n", ns.Namespace,
-		"-o", "jsonpath=\"{.items[0].metadata.name}\"")
-	podNameBytes, err := Run(cmd)
-	if err != nil {
-		return fmt.Errorf("failed to get controller pod name: %v", err)
-	}
-	podName := string(podNameBytes)
-	if podName == "" {
-		return fmt.Errorf("no controller pod found")
-	}
-
-	// Check readyz endpoint directly via kubectl exec
-	cmd = exec.Command("kubectl", "exec", "-n", ns.Namespace, podName, "--",
-		"wget", "-q", "-O-", "http://localhost:8081/readyz")
-	_, err = Run(cmd)
-	if err != nil {
-		return fmt.Errorf("readyz endpoint not ready: %v", err)
-	}
-
-	return nil
-}
-*/
 
 // Run executes the provided command within this context
 func Run(cmd *exec.Cmd) ([]byte, error) {

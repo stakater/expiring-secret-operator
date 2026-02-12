@@ -35,46 +35,6 @@ import (
 	"github.com/stakater/expiring-secrets/test/utils"
 )
 
-func generateSecret(ns types.NamespacedName, validUntil string, payload []byte) *corev1.Secret {
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ns.Name,
-			Namespace: ns.Namespace,
-			Labels: map[string]string{
-				"expiringsecret.stakater.com/validUntil": validUntil,
-			},
-		},
-		Data: map[string][]byte{
-			"token": payload,
-		},
-	}
-
-	return secret
-}
-
-func generateMonitor(
-	ns types.NamespacedName,
-	service string,
-	secretRef types.NamespacedName,
-	alertThresholds *expiringsecretv1alpha1.AlertThresholds,
-) *expiringsecretv1alpha1.Monitor {
-	monitor := &expiringsecretv1alpha1.Monitor{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ns.Name,
-			Namespace: ns.Namespace,
-		},
-		Spec: expiringsecretv1alpha1.MonitorSpec{
-			Service: service,
-			SecretRef: expiringsecretv1alpha1.SecretReference{
-				Name:      secretRef.Name,
-				Namespace: secretRef.Namespace,
-			},
-			AlertThresholds: alertThresholds,
-		},
-	}
-	return monitor
-}
-
 var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 	var (
 		k8sClient client.Client
@@ -138,11 +98,11 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 			By("creating a secret with future expiration date")
 			futureDate := time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02")
-			secret := generateSecret(nsSecret, futureDate, []byte("fake-registry-token"))
+			secret := utils.GenerateSecret(nsSecret, futureDate, []byte("fake-registry-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := generateMonitor(nsMonitor, "docker.io", nsSecret, &expiringsecretv1alpha1.AlertThresholds{
+			monitor := utils.GenerateMonitor(nsMonitor, "docker.io", nsSecret, &expiringsecretv1alpha1.AlertThresholds{
 				InfoDays:     30,
 				WarningDays:  14,
 				CriticalDays: 7,
@@ -179,11 +139,11 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 			By("creating a secret with future expiration date")
 			futureDate := time.Now().Add(20 * 24 * time.Hour).Format("2006-01-02")
-			secret := generateSecret(nsSecret, futureDate, []byte("fake-registry-token"))
+			secret := utils.GenerateSecret(nsSecret, futureDate, []byte("fake-registry-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := generateMonitor(nsMonitor, "docker.io", nsSecret, &expiringsecretv1alpha1.AlertThresholds{
+			monitor := utils.GenerateMonitor(nsMonitor, "docker.io", nsSecret, &expiringsecretv1alpha1.AlertThresholds{
 				InfoDays:     30,
 				WarningDays:  14,
 				CriticalDays: 7,
@@ -220,13 +180,12 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			}
 
 			By("creating a secret with future expiration date")
-			futureDate := time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02")
-			secret := generateSecret(nsSecret, futureDate, []byte("fake-registry-token"))
-			delete(secret.Labels, "expiringsecret.stakater.com/validUntil")
+			//futureDate := time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02")
+			secret := utils.GenerateSecret(nsSecret, "", []byte("fake-registry-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := generateMonitor(nsMonitor, "docker.io", nsSecret, &expiringsecretv1alpha1.AlertThresholds{
+			monitor := utils.GenerateMonitor(nsMonitor, "docker.io", nsSecret, &expiringsecretv1alpha1.AlertThresholds{
 				InfoDays:     30,
 				WarningDays:  14,
 				CriticalDays: 7,
@@ -245,7 +204,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			By("verifying monitor status details")
 			Expect(string(monitor.Status.State)).To(Equal(string(expiringsecretv1alpha1.MonitorStateError)))
 			Expect(monitor.Status.Message).To(
-				Equal(fmt.Sprintf("Secret does not have %s label", "expiringsecret.stakater.com/validUntil")))
+				Equal(fmt.Sprintf("Secret does not have %s label", utils.ValidUntilLabel)))
 		})
 
 		It("should handle expired secrets correctly", func() {
@@ -260,11 +219,11 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 			By("creating a secret with past expiration date")
 			pastDate := time.Now().Add(-5 * 24 * time.Hour).Format("2006-01-02")
-			secret := generateSecret(nsSecret, pastDate, []byte("expired-token"))
+			secret := utils.GenerateSecret(nsSecret, pastDate, []byte("expired-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := generateMonitor(nsMonitor, "quay.io", nsSecret, nil)
+			monitor := utils.GenerateMonitor(nsMonitor, "quay.io", nsSecret, nil)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect expired state")
@@ -293,7 +252,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			}
 
 			By("creating a monitor resource referencing non-existent secret")
-			monitor := generateMonitor(nsMonitor, "ghcr.io", nsSecret, nil)
+			monitor := utils.GenerateMonitor(nsMonitor, "ghcr.io", nsSecret, nil)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect error state")
@@ -322,11 +281,11 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 			By("creating a secret expiring in 3 days")
 			criticalDate := time.Now().Add(3 * 24 * time.Hour).Format("2006-01-02")
-			secret := generateSecret(nsSecret, criticalDate, []byte("critical-token"))
+			secret := utils.GenerateSecret(nsSecret, criticalDate, []byte("critical-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor with 7-day critical threshold")
-			monitor := generateMonitor(
+			monitor := utils.GenerateMonitor(
 				nsMonitor, "registry.k8s.io", nsSecret,
 				&expiringsecretv1alpha1.AlertThresholds{
 					CriticalDays: 7,
@@ -404,11 +363,11 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			}
 			By("creating secret in different namespace")
 			futureDate := time.Now().Add(25 * 24 * time.Hour).Format("2006-01-02")
-			secret := generateSecret(nsSecret, futureDate, []byte("cross-namespace-token"))
+			secret := utils.GenerateSecret(nsSecret, futureDate, []byte("cross-namespace-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating monitor that references cross-namespace secret")
-			monitor := generateMonitor(nsMonitor, "docker.io", nsSecret, nil)
+			monitor := utils.GenerateMonitor(nsMonitor, "docker.io", nsSecret, nil)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to process cross-namespace secret")
@@ -467,11 +426,11 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 			By("creating a secret with future expiration date")
 			futureDate := time.Now().Add(20 * 24 * time.Hour).Format("2006-01-02")
-			secret := generateSecret(validSecret, futureDate, []byte("fake-registry-token"))
+			secret := utils.GenerateSecret(validSecret, futureDate, []byte("fake-registry-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := generateMonitor(validMonitor, "docker.io", validSecret, &expiringsecretv1alpha1.AlertThresholds{
+			monitor := utils.GenerateMonitor(validMonitor, "docker.io", validSecret, &expiringsecretv1alpha1.AlertThresholds{
 				InfoDays:     30,
 				WarningDays:  14,
 				CriticalDays: 7,
@@ -497,11 +456,11 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 			By("creating a secret with past expiration date")
 			pastDate := time.Now().Add(-5 * 24 * time.Hour).Format("2006-01-02")
-			secret = generateSecret(expiredSecret, pastDate, []byte("expired-token"))
+			secret = utils.GenerateSecret(expiredSecret, pastDate, []byte("expired-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource for secret with past expiration date")
-			monitor = generateMonitor(expiredMonitor, "quay.io", expiredSecret, nil)
+			monitor = utils.GenerateMonitor(expiredMonitor, "quay.io", expiredSecret, nil)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect expired state")

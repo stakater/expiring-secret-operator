@@ -21,6 +21,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	expiringsecretv1alpha1 "github.com/stakater/expiring-secrets/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/runtime"
+	// +kubebuilder:scaffold:imports
 )
 
 func TestMain(t *testing.T) {
@@ -29,7 +32,13 @@ func TestMain(t *testing.T) {
 }
 
 var _ = Describe("Main", func() {
-	It("should run a sample test", func() {
-		Expect(true).To(BeTrue())
+	var (
+		scheme = runtime.NewScheme()
+	)
+
+	It("should not error", func() {
+		Expect(scheme).NotTo(BeNil())
+		Expect(expiringsecretv1alpha1.AddToScheme(scheme)).NotTo(HaveOccurred())
 	})
+
 })
