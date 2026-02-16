@@ -18,20 +18,23 @@ package utils
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	expiringsecretv1alpha1 "github.com/stakater/expiring-secrets/api/v1alpha1"
+	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
 )
 
 var (
-	ValidUntilLabel = "expiringsecret.stakater.com/validUntil"
+	ValidUntilLabel = "expiring-secrets.stakater.com/validUntil"
 )
 
 func Log(format string, a ...any) {
@@ -42,17 +45,41 @@ func WarnError(err error) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "warning: %v\n", err)
 }
 
-func GenerateSecret(ns types.NamespacedName, validUntil string, payload []byte) *corev1.Secret {
+func Filter[T any](s []T, predicate func(T) bool) []T {
+	result := make([]T, 0, len(s)) // Pre-allocate for efficiency
+	for _, v := range s {
+		if predicate(v) {
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+func UniqueNamespaces(s []types.NamespacedName) []string {
+	namespaces := make([]string, 0, len(s))
+	for _, v := range s {
+		if slices.Contains(namespaces, v.Namespace) {
+			continue
+		}
+		namespaces = append(namespaces, v.Namespace)
+	}
+	return namespaces
+}
+
+func GenerateFullSecret(ns types.NamespacedName, validUntil string, payload []byte) *corev1.Secret {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      ns.Name,
 			Namespace: ns.Namespace,
 			Labels:    map[string]string{},
 		},
-		Data: map[string][]byte{
-			"token": payload,
-		},
+		Data: map[string][]byte{},
 	}
+
+	if len(payload) == 0 {
+		payload = []byte("fake-registry-token")
+	}
+	secret.Data = map[string][]byte{"token": payload}
 
 	if validUntil != "" {
 		secret.Labels[ValidUntilLabel] = validUntil
@@ -61,10 +88,27 @@ func GenerateSecret(ns types.NamespacedName, validUntil string, payload []byte) 
 	return secret
 }
 
-func GenerateMonitor(
+func GenerateValidStringSecret(ns types.NamespacedName, validUntil string) *corev1.Secret {
+	return GenerateFullSecret(ns, validUntil, nil)
+}
+
+func GenerateValidDaysSecret(ns types.NamespacedName, validDays int) *corev1.Secret {
+	futureDate := time.Now().Add(time.Duration(validDays) * 24 * time.Hour)
+	return GenerateFullSecret(ns, futureDate.Format("2006-01-02"), nil)
+}
+
+func GeneratePayloadSecret(ns types.NamespacedName, payload []byte) *corev1.Secret {
+	return GenerateFullSecret(ns, "", payload)
+}
+
+func GenerateSecret(ns types.NamespacedName) *corev1.Secret {
+	return GenerateFullSecret(ns, "", nil)
+}
+
+func GenerateFullMonitor(
 	ns types.NamespacedName,
-	service string,
 	secretRef types.NamespacedName,
+	service string,
 	alertThresholds *expiringsecretv1alpha1.AlertThresholds,
 ) *expiringsecretv1alpha1.Monitor {
 	monitor := &expiringsecretv1alpha1.Monitor{
@@ -74,7 +118,7 @@ func GenerateMonitor(
 		},
 		Spec: expiringsecretv1alpha1.MonitorSpec{
 			Service: service,
-			SecretRef: expiringsecretv1alpha1.SecretReference{
+			SecretRef: &expiringsecretv1alpha1.SecretReference{
 				Name:      secretRef.Name,
 				Namespace: secretRef.Namespace,
 			},
@@ -82,6 +126,32 @@ func GenerateMonitor(
 		},
 	}
 	return monitor
+}
+
+func GenerateMonitorService(
+	ns types.NamespacedName,
+	secretRef types.NamespacedName,
+	service string,
+) *expiringsecretv1alpha1.Monitor {
+	return GenerateFullMonitor(ns, secretRef, service, nil)
+}
+
+func GenerateMonitor(ns types.NamespacedName, secretRef types.NamespacedName) *expiringsecretv1alpha1.Monitor {
+	services := []string{
+		"contoso.azurecr.io",
+		"mcr.microsoft.com",
+		"quay.io",
+		"gcr.io",
+		"docker.io",
+		"ghcr.io",
+		"ecr.aws",
+		"registry.k8s.io",
+		"index.docker.io",
+		"artifacts.azure.com",
+		"harbor.mycompany.com",
+	}
+	service := services[rand.Intn(len(services))]
+	return GenerateFullMonitor(ns, secretRef, service, nil)
 }
 
 // WaitForStatus waits until the specified condition is met for the given resource,

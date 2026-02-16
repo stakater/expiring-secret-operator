@@ -272,15 +272,27 @@ common-test-e2e-dev: ## Run e2e tests locally with guaranteed cleanup even on fa
 		$(MAKE) test-e2e; \
 		exit_code=$$?; \
 		if [ $$exit_code -ne 0 ]; then \
-			kubectl logs deploy/$(OPERATOR_NAME)-controller-manager -n $(OPERATOR_NS); \
+			$(MAKE) get-pod-logs; \
 		fi; \
 		echo "Cleaning up..."; \
 		$(MAKE) post-e2e-test; \
 		exit $$exit_code; \
 	}
 
+# This target is used to print the logs of the operator's pod(s) in the test cluster,
+# which can be helpful for debugging failed e2e tests.
+.PHONY: common-get-pod-logs
+common-get-pod-logs:
+	@{ \
+	echo "$(FG_BLUE)>> $(FG_GREEN)---- Pod logs (last 50 lines, if any) ----$(RESET)"; \
+	for p in $$( $(KUBECTL) -n "$$ns" get pods -l control-plane=controller-manager -o name 2>/dev/null ); do \
+		echo "$(FG_BLUE)>> $(FG_GREEN)-- $$p --$(RESET)"; \
+		kubectl logs "$$p" -n $(OPERATOR_NS) --tail=50 2>/dev/null || true; \
+	done; \
+	}
+
 .PHONY: common-test-scorecard
-common-test-scorecard: cluster bundle ## Run operator-sdk scorecard tests.
+common-test-scorecard: operator-sdk cluster bundle ## Run operator-sdk scorecard tests.
 	@echo "$(FG_BLUE)>> $(FG_GREEN)running operator-sdk scorecard$(RESET)"
 	@failed_tests=$$($(OPERATOR_SDK) scorecard bundle \
 		-c bundle/tests/scorecard/config.yaml --output json | \
@@ -311,7 +323,6 @@ common-lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 .PHONY: common-pre-e2e-test
 common-pre-e2e-test: kustomize docker-build
 	@echo "$(FG_BLUE)>> $(FG_GREEN)Installing CRDs and deploying operator...$(RESET)"
-	$(MAKE) install
 	$(MAKE) deploy
 
 # Uninstall dependencies and undeploy operator after e2e tests.
@@ -443,6 +454,7 @@ common-docker-buildx: ## Build and push docker image for the manager for cross-p
 	rm -f "$$tmp"
 
 .PHONY: common-build-installer
+
 common-build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	@echo "$(FG_BLUE)>> $(FG_GREEN)building installer manifests$(RESET)"
 	mkdir -p dist
@@ -450,9 +462,8 @@ common-build-installer: manifests generate kustomize ## Generate a consolidated 
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
 .PHONY: common-cluster
-common-cluster: ## Setup Kind cluster with specified action (default: cluster). Usage: make cluster ACTION=<action>
+common-cluster: setup-cluster ## Setup Kind cluster with specified action (default: cluster). Usage: make cluster ACTION=<action>
 	@echo "$(FG_BLUE)>> $(FG_GREEN)setting up Kind cluster with action '$(ACTION)'$(RESET)"
-	curl -sSL https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/scripts/setup-kind-cluster.sh | \
 	TEST_CLUSTER_NAME=$(TEST_CLUSTER_NAME) \
 	IMG=$(IMG) \
 	CONTAINER_TOOL=$(CONTAINER_TOOL) \
@@ -463,7 +474,7 @@ common-cluster: ## Setup Kind cluster with specified action (default: cluster). 
 	PULL_SECRET_NAME=$(PULL_SECRET_NAME) \
 	GHCR_USERNAME=$(GHCR_USERNAME) \
 	GHCR_TOKEN=$(GHCR_TOKEN) \
-	bash -s $(ACTION)
+	bash $(SETUP_CLUSTER) $(ACTION)
 
 
 .PHONY: common-load-image
@@ -791,17 +802,54 @@ fi \
 }
 endef
 
+
+# fetch-script will fetch anything and make it executable, if it doesn't exist
+# $1 - url which can be called
+# $2 - local path to save the file
+define fetch-script
+{ \
+set -e; \
+if [ ! -f "$(2)" ]; then \
+	echo "$(FG_BLUE)>> $(FG_GREEN)Fetching: $(2)$(RESET)" ; \
+	curl -sSLo $(2) "$(1)" ;\
+	chmod +x $(2) ;\
+fi \
+}
+endef
+
+
+.PHONY: common-setup-cluster
+SETUP_CLUSTER ?= $(LOCALBIN)/setup-kind-cluster.sh
+common-setup-cluster: ## Download setup-cluster.sh locally if necessary.
+ifeq (,$(wildcard $(SETUP_CLUSTER)))
+ifeq (, $(shell which setup-kind-cluster.sh 2>/dev/null))
+	$(call fetch-script,https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/scripts/setup-kind-cluster.sh,$(SETUP_CLUSTER))
+else
+SETUP_CLUSTER = $(shell which setup-kind-cluster.sh)
+endif
+endif
+
+.PHONY: common-generate-catalog-index
+# Script to generate catalog index from bundle images.
+CATALOG_INDEX_SCRIPT ?= $(LOCALBIN)/generate-catalog-index.sh
+common-generate-catalog-index: ## Download generate-catalog-index.sh locally if necessary.
+ifeq (,$(wildcard $(CATALOG_INDEX_SCRIPT)))
+ifeq (, $(shell which generate-catalog-index.sh 2>/dev/null))
+	$(call fetch-script,https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/scripts/generate-catalog-index.sh,$(CATALOG_INDEX_SCRIPT))
+else
+CATALOG_INDEX_SCRIPT = $(shell which generate-catalog-index.sh)
+endif
+endif
+
 .PHONY: common-operator-sdk
 OPERATOR_SDK ?= $(LOCALBIN)/operator-sdk
 common-operator-sdk: ## Download operator-sdk locally if necessary.
 ifeq (,$(wildcard $(OPERATOR_SDK)))
 ifeq (, $(shell which operator-sdk 2>/dev/null))
 	@{ \
-	set -e ;\
 	mkdir -p $(dir $(OPERATOR_SDK)) ;\
 	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSLo $(OPERATOR_SDK) https://github.com/operator-framework/operator-sdk/releases/download/$(OPERATOR_SDK_VERSION)/operator-sdk_$${OS}_$${ARCH} ;\
-	chmod +x $(OPERATOR_SDK) ;\
+	$(call fetch-script,https://github.com/operator-framework/operator-sdk/releases/download/$(OPERATOR_SDK_VERSION)/operator-sdk_$${OS}_$${ARCH},$(OPERATOR_SDK))
 	}
 else
 OPERATOR_SDK = $(shell which operator-sdk)
@@ -809,16 +857,14 @@ endif
 endif
 
 .PHONY: common-opm
-OPM = $(LOCALBIN)/opm
+OPM ?= $(LOCALBIN)/opm
 common-opm: ## Download opm locally if necessary.
 ifeq (,$(wildcard $(OPM)))
 ifeq (,$(shell which opm 2>/dev/null))
 	@{ \
-	set -e ;\
 	mkdir -p $(dir $(OPM)) ;\
 	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSLo $(OPM) https://github.com/operator-framework/operator-registry/releases/download/$(OPM_VERSION)/$${OS}-$${ARCH}-opm ;\
-	chmod +x $(OPM) ;\
+	$(call fetch-script,https://github.com/operator-framework/operator-registry/releases/download/$(OPM_VERSION)/$${OS}-$${ARCH}-opm,$(OPM))
 	}
 else
 OPM = $(shell which opm)
@@ -832,11 +878,9 @@ common-yq:
 ifeq (,$(wildcard $(YQ_BIN)))
 ifeq (,$(shell which yq 2>/dev/null))
 	@{ \
-	set -e ;\
 	mkdir -p $(dir $(YQ_BIN)) ;\
 	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSLo $(YQ_BIN) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$${OS}-$${ARCH} ;\
-	chmod +x $(YQ_BIN) ;\
+	$(call fetch-script,https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$${OS}_$${ARCH},$(YQ_BIN))
 	}
 else
 YQ_BIN = $(shell which yq)
@@ -878,9 +922,10 @@ common-bundle-push: ## Push the bundle image.
 
 # Render bundle to the catalog index.
 .PHONY: common-catalog-render
-common-catalog-render: opm yq ## Render bundle to catalog index.
+common-catalog-render: opm yq generate-catalog-index ## Render bundle to catalog index.
 	@echo "$(FG_BLUE)>> $(FG_GREEN)Rendering catalog index with bundle images$(RESET)"
-	bash generate-catalog-index.sh $(DOCKER_REPO_BASE) $(OPERATOR_NAME) $(CATALOG_DIR_PATH) $(VERSION) $(GIT_TAG)
+	PATH="$(LOCALBIN):$$PATH" \
+	bash -c $(CATALOG_INDEX_SCRIPT) "$(DOCKER_REPO_BASE)" "$(OPERATOR_NAME)" "$(CATALOG_DIR_PATH)" "$(VERSION)" "$(GIT_TAG)"
 
 # Build a catalog image by adding bundle images to an empty catalog using the operator package manager tool, 'opm'.
 # This recipe invokes 'opm' in 'semver' bundle add mode. For more information on add modes, see:
@@ -888,7 +933,12 @@ common-catalog-render: opm yq ## Render bundle to catalog index.
 .PHONY: common-catalog-build
 common-catalog-build: opm ## Build a catalog image.
 	@echo "$(FG_BLUE)>> $(FG_GREEN)Building catalog image $(CATALOG_IMG) with bundles: $(BUNDLE_IMGS)$(RESET)"
-	$(OPM) index add --container-tool docker --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
+	$(OPM) index add \
+		--container-tool docker \
+		--mode semver \
+		--tag $(CATALOG_IMG) \
+		--bundles $(BUNDLE_IMGS) \
+		$(FROM_INDEX_OPT)
 
 # Push the catalog image.
 .PHONY: common-catalog-push

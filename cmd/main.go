@@ -35,8 +35,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	expiringsecretv1alpha1 "github.com/stakater/expiring-secrets/api/v1alpha1"
-	"github.com/stakater/expiring-secrets/internal/controller"
+	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
+	"github.com/stakater/expiring-secret-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 

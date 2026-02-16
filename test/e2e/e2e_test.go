@@ -17,8 +17,8 @@ limitations under the License.
 package e2e
 
 import (
-	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -27,87 +27,72 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	expiringsecretv1alpha1 "github.com/stakater/expiring-secrets/api/v1alpha1"
-	"github.com/stakater/expiring-secrets/test/utils"
+	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
+	internalutils "github.com/stakater/expiring-secret-operator/internal/utils"
+	"github.com/stakater/expiring-secret-operator/test/utils"
 )
 
 var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
-	var (
-		k8sClient client.Client
-		ctx       context.Context
+	const (
+		timeout  = time.Second * 120
+		interval = time.Second * 2
+
+		//timeout  = time.Second * 30
+		//interval = time.Second * 10
+		cleanUpTimeout  = time.Second * 60
+		cleanUpInterval = time.Second * 1
 	)
-
-	BeforeAll(func() {
-		ctx = context.Background()
-		By("setting up kubernetes client")
-		cfg, err := config.GetConfig()
-		Expect(err).NotTo(HaveOccurred())
-
-		err = expiringsecretv1alpha1.AddToScheme(scheme.Scheme)
-		Expect(err).NotTo(HaveOccurred())
-
-		k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-		Expect(err).NotTo(HaveOccurred())
-
-		//By("creating manager namespace")
-		//cmd := exec.Command("kubectl", "create", "ns", namespace)
-		//_, _ = utils.Run(cmd)
-	})
-
-	AfterAll(func() {
-		//By("removing manager namespace")
-		//cmd := exec.Command("kubectl", "delete", "ns", namespace)
-		//_, _ = utils.Run(cmd)
-	})
+	var h *utils.TestHelper
 
 	Context("Monitor Resource Functionality", func() {
-		var testNamespace string
+		nsSecret := h.NsName("test-secret", "my-test-namespace")
+		nsMonitor := h.NsName("test-monitor", "my-test-namespace")
 
 		BeforeEach(func() {
-			// Generate unique namespace name for each test to avoid conflicts
-			testNamespace = fmt.Sprintf("e2e-test-%d", time.Now().UnixNano())
-			By("creating test namespace: " + testNamespace)
-			ns := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{Name: testNamespace},
+			h = utils.NewHelper(ctx, k8sClient)
+			h.VerifyNamespaces(nsSecret, nsMonitor)
+
+			By("Checking if the custom resource is removed")
+			monitor := &expiringsecretv1alpha1.Monitor{}
+			err := k8sClient.Get(ctx, nsMonitor, monitor)
+			if err != nil && client.IgnoreNotFound(err) != nil {
+				Expect(err).NotTo(HaveOccurred())
 			}
-			err := k8sClient.Create(ctx, ns)
-			Expect(err).NotTo(HaveOccurred())
+
+			By("Checking if the secret is removed")
+			secret := &corev1.Secret{}
+			err = k8sClient.Get(ctx, nsSecret, secret)
+			if err != nil && client.IgnoreNotFound(err) != nil {
+				Expect(err).NotTo(HaveOccurred())
+			}
 		})
 
 		AfterEach(func() {
-			By("cleaning up test namespace")
-			ns := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{Name: testNamespace},
-			}
-			_ = k8sClient.Delete(ctx, ns)
+			h.CleanupResources(cleanUpTimeout, cleanUpInterval,
+				utils.ObjectResource{
+					Name:     nsMonitor,
+					Resource: &expiringsecretv1alpha1.Monitor{},
+				},
+				utils.ObjectResource{
+					Name:     nsSecret,
+					Resource: &corev1.Secret{},
+				},
+			)
 		})
 
 		It("should monitor a secret with a valid expiration date", func() {
-			nsSecret := types.NamespacedName{
-				Name:      "test-secret-valid",
-				Namespace: testNamespace,
-			}
-			nsMonitor := types.NamespacedName{
-				Name:      "test-monitor-valid",
-				Namespace: testNamespace,
-			}
-
 			By("creating a secret with future expiration date")
 			futureDate := time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02")
-			secret := utils.GenerateSecret(nsSecret, futureDate, []byte("fake-registry-token"))
+			secret := utils.GenerateValidDaysSecret(nsSecret, 365)
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			log.Info("Created secret with valid expiration date", "secret", nsSecret, "validUntil", futureDate)
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, "docker.io", nsSecret, &expiringsecretv1alpha1.AlertThresholds{
-				InfoDays:     30,
-				WarningDays:  14,
-				CriticalDays: 7,
-			})
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+			log.Info("Created monitor resource", "monitor", monitor)
 
 			By("waiting for monitor status to be updated")
 			Eventually(func() bool {
@@ -119,37 +104,24 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 					monitor.Status.ExpiresAt != nil &&
 					monitor.Status.SecondsRemaining != nil &&
 					monitor.Status.LastChecked != nil
-			}, 180*time.Second, 10*time.Second).Should(BeTrue())
+			}, timeout, interval).Should(BeTrue())
 
 			By("verifying monitor status details")
-			Expect(string(monitor.Status.State)).To(Equal(string(expiringsecretv1alpha1.MonitorStateValid)))
+			Expect(monitor.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateValid))
 			Expect(monitor.Status.Message).To(Equal(fmt.Sprintf("Secret is valid until %s", futureDate)))
 			Expect(*monitor.Status.SecondsRemaining).To(BeNumerically(">", 0))
 		})
 
 		It("should monitor a secret with an expiration date coming up", func() {
-			nsSecret := types.NamespacedName{
-				Name:      "test-secret-expires-soon",
-				Namespace: testNamespace,
-			}
-			nsMonitor := types.NamespacedName{
-				Name:      "test-monitor-expires-soon",
-				Namespace: testNamespace,
-			}
-
 			By("creating a secret with future expiration date")
-			futureDate := time.Now().Add(20 * 24 * time.Hour).Format("2006-01-02")
-			secret := utils.GenerateSecret(nsSecret, futureDate, []byte("fake-registry-token"))
+			secret := utils.GenerateValidDaysSecret(nsSecret, 20)
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, "docker.io", nsSecret, &expiringsecretv1alpha1.AlertThresholds{
-				InfoDays:     30,
-				WarningDays:  14,
-				CriticalDays: 7,
-			})
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
+			monitor = &expiringsecretv1alpha1.Monitor{}
 			By("waiting for monitor status to be updated")
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, nsMonitor, monitor)
@@ -160,37 +132,41 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 					monitor.Status.ExpiresAt != nil &&
 					monitor.Status.SecondsRemaining != nil &&
 					monitor.Status.LastChecked != nil
-			}, 30*time.Second, 2*time.Second).Should(BeTrue())
+			}, timeout, interval).Should(BeTrue())
+
+			monitor = &expiringsecretv1alpha1.Monitor{}
+			err := k8sClient.Get(ctx, nsMonitor, monitor)
+			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying monitor status details")
-			Expect(string(monitor.Status.State)).To(Equal(string(expiringsecretv1alpha1.MonitorStateInfo)))
+			log.Info("Verifying monitor", "monitor", monitor)
+			By("monitor.Status.State")
+			Expect(monitor.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateInfo))
+			By("monitor.Status.Message")
 			Expect(monitor.Status.Message).To(Equal(
 				fmt.Sprintf("Secret expires in less than %d days", monitor.Spec.AlertThresholds.InfoDays)))
+			By("monitor.Status.SecondsRemaining")
 			Expect(*monitor.Status.SecondsRemaining).To(BeNumerically(">", 0))
 		})
 
 		It("should handle a secret without a validUntil label", func() {
-			nsSecret := types.NamespacedName{
-				Name:      "test-secret-valid",
-				Namespace: testNamespace,
-			}
-			nsMonitor := types.NamespacedName{
-				Name:      "test-monitor-valid",
-				Namespace: testNamespace,
-			}
-
 			By("creating a secret with future expiration date")
-			//futureDate := time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02")
-			secret := utils.GenerateSecret(nsSecret, "", []byte("fake-registry-token"))
+			secret := utils.GeneratePayloadSecret(nsSecret, []byte("fake-registry-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, "docker.io", nsSecret, &expiringsecretv1alpha1.AlertThresholds{
-				InfoDays:     30,
-				WarningDays:  14,
-				CriticalDays: 7,
-			})
-			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			//Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+			err := k8sClient.Create(ctx, monitor)
+			if err != nil {
+				getErr := k8sClient.Get(ctx, nsMonitor, monitor)
+				if getErr != nil {
+					log.Info("Monitor get failed", "err", getErr)
+				} else {
+					log.Info("Monitor", "mon", monitor)
+				}
+			}
+			Expect(err).To(Succeed())
 
 			By("waiting for monitor status to be updated")
 			Eventually(func() bool {
@@ -199,31 +175,22 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 					return false
 				}
 				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateError
-			}, 180*time.Second, 10*time.Second).Should(BeTrue())
+			}, timeout, interval).Should(BeTrue())
 
 			By("verifying monitor status details")
-			Expect(string(monitor.Status.State)).To(Equal(string(expiringsecretv1alpha1.MonitorStateError)))
+			Expect(monitor.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateError))
 			Expect(monitor.Status.Message).To(
-				Equal(fmt.Sprintf("Secret does not have %s label", utils.ValidUntilLabel)))
+				ContainSubstring(fmt.Sprintf("Source object does not have any labels, expected %s label", utils.ValidUntilLabel)))
 		})
 
 		It("should handle expired secrets correctly", func() {
-			nsSecret := types.NamespacedName{
-				Name:      "test-secret-expired",
-				Namespace: testNamespace,
-			}
-			nsMonitor := types.NamespacedName{
-				Name:      "test-monitor-expired",
-				Namespace: testNamespace,
-			}
-
 			By("creating a secret with past expiration date")
 			pastDate := time.Now().Add(-5 * 24 * time.Hour).Format("2006-01-02")
-			secret := utils.GenerateSecret(nsSecret, pastDate, []byte("expired-token"))
+			secret := utils.GenerateValidDaysSecret(nsSecret, -5)
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, "quay.io", nsSecret, nil)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect expired state")
@@ -233,26 +200,17 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 					return false
 				}
 				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateExpired
-			}, 30*time.Second, 2*time.Second).Should(BeTrue())
+			}, timeout, interval).Should(BeTrue())
 
 			By("verifying expired status details")
-			Expect(string(monitor.Status.State)).To(Equal(string(expiringsecretv1alpha1.MonitorStateExpired)))
+			Expect(monitor.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateExpired))
 			Expect(monitor.Status.Message).To(Equal(fmt.Sprintf("Secret expired on %s", pastDate)))
 			Expect(*monitor.Status.SecondsRemaining).To(BeNumerically("<", 0))
 		})
 
 		It("should handle missing secrets gracefully", func() {
-			nsMonitor := types.NamespacedName{
-				Name:      "test-monitor-missing",
-				Namespace: testNamespace,
-			}
-			nsSecret := types.NamespacedName{
-				Name:      "non-existent-secret",
-				Namespace: testNamespace,
-			}
-
 			By("creating a monitor resource referencing non-existent secret")
-			monitor := utils.GenerateMonitor(nsMonitor, "ghcr.io", nsSecret, nil)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect error state")
@@ -262,35 +220,23 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 					return false
 				}
 				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateError
-			}, 30*time.Second, 2*time.Second).Should(BeTrue())
+			}, timeout, interval).Should(BeTrue())
 
 			By("verifying error status")
-			Expect(string(monitor.Status.State)).To(Equal(string(expiringsecretv1alpha1.MonitorStateError)))
-			Expect(monitor.Status.Message).To(Equal("Referenced secret not found"))
+			Expect(monitor.Status.State).
+				To(Equal(expiringsecretv1alpha1.MonitorStateError))
+			Expect(monitor.Status.Message).
+				To(Equal("Failed to get source Secret: referenced secret not found"))
 		})
 
 		It("should handle critical threshold correctly", func() {
-			nsSecret := types.NamespacedName{
-				Name:      "test-secret-critical",
-				Namespace: testNamespace,
-			}
-			nsMonitor := types.NamespacedName{
-				Name:      "test-monitor-critical",
-				Namespace: testNamespace,
-			}
-
 			By("creating a secret expiring in 3 days")
 			criticalDate := time.Now().Add(3 * 24 * time.Hour).Format("2006-01-02")
-			secret := utils.GenerateSecret(nsSecret, criticalDate, []byte("critical-token"))
+			secret := utils.GenerateFullSecret(nsSecret, criticalDate, []byte("critical-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-			By("creating a monitor with 7-day critical threshold")
-			monitor := utils.GenerateMonitor(
-				nsMonitor, "registry.k8s.io", nsSecret,
-				&expiringsecretv1alpha1.AlertThresholds{
-					CriticalDays: 7,
-				},
-			)
+			By("creating a monitor")
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect critical state")
@@ -300,26 +246,47 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 					return false
 				}
 				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateCritical
-			}, 30*time.Second, 2*time.Second).Should(BeTrue())
+			}, timeout, interval).Should(BeTrue())
 
 			By("verifying critical status")
-			Expect(string(monitor.Status.State)).To(Equal(string(expiringsecretv1alpha1.MonitorStateCritical)))
+			Expect(monitor.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateCritical))
+			Expect(monitor.Status.Message).To(ContainSubstring("expires in less than"))
+		})
+
+		It("should handle warning threshold correctly", func() {
+			By("creating a secret expiring in 10 days")
+			warningDate := time.Now().Add(10 * 24 * time.Hour).Format("2006-01-02")
+			secret := utils.GenerateFullSecret(nsSecret, warningDate, []byte("warning-token"))
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			By("creating a monitor")
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+
+			By("waiting for monitor to detect warning state")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, nsMonitor, monitor)
+				if err != nil {
+					return false
+				}
+				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateWarning &&
+					monitor.Status.ExpiresAt != nil &&
+					monitor.Status.SecondsRemaining != nil &&
+					monitor.Status.LastChecked != nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("verifying warning status")
+			Expect(monitor.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateWarning))
 			Expect(monitor.Status.Message).To(ContainSubstring("expires in less than"))
 		})
 	})
 
 	Context("Monitor Resource Functionality Cross-Namespace", func() {
-		var (
-			monitorNamespace string
-			secretNamespace  string
-		)
+		monitorNamespace := "e2e-test"
+		secretNamespace := "secret-ns"
 
 		BeforeEach(func() {
-			// Generate unique namespace name for each test to avoid conflicts
-			By("creating unique namespace names")
-			now := time.Now()
-			monitorNamespace = fmt.Sprintf("e2e-test-%d", now.UnixNano())
-			secretNamespace = fmt.Sprintf("secret-ns-%d", now.UnixNano())
+			h = utils.NewHelper(ctx, k8sClient)
 
 			By("creating monitor namespace: " + monitorNamespace)
 			monitorNS := &corev1.Namespace{
@@ -353,21 +320,16 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 		})
 
 		It("should handle cross-namespace secret references", func() {
-			nsSecret := types.NamespacedName{
-				Name:      "cross-ns-secret",
-				Namespace: secretNamespace,
-			}
-			nsMonitor := types.NamespacedName{
-				Name:      "test-monitor-cross-ns",
-				Namespace: monitorNamespace,
-			}
+			nsSecret := h.NsName("cross-ns-secret", secretNamespace)
+			nsMonitor := h.NsName("test-monitor-cross-ns", monitorNamespace)
+
 			By("creating secret in different namespace")
 			futureDate := time.Now().Add(25 * 24 * time.Hour).Format("2006-01-02")
-			secret := utils.GenerateSecret(nsSecret, futureDate, []byte("cross-namespace-token"))
+			secret := utils.GenerateFullSecret(nsSecret, futureDate, []byte("cross-namespace-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating monitor that references cross-namespace secret")
-			monitor := utils.GenerateMonitor(nsMonitor, "docker.io", nsSecret, nil)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to process cross-namespace secret")
@@ -378,7 +340,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 				}
 				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateInfo &&
 					monitor.Status.ExpiresAt != nil
-			}, 30*time.Second, 2*time.Second).Should(BeTrue())
+			}, timeout, interval).Should(BeTrue())
 
 			err := k8sClient.Get(ctx, nsMonitor, monitor)
 			Expect(err).NotTo(HaveOccurred())
@@ -392,24 +354,77 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 	Context("Prometheus Metrics", func() {
 		var (
-			testNamespace string
-			nsPrefix      = "test-e2e-metrics"
-			projectName   = "expiring-secrets"
+			testNamespace = "test-e2e-metrics"
+			projectName   = "expiring-secret-operator"
 			namespace     = fmt.Sprintf("%s-system", projectName)
 			svcName       = fmt.Sprintf("%s-controller-manager-metrics-service", projectName)
 			crbName       = fmt.Sprintf("%s-metrics-binding", projectName)
+			managerName   = fmt.Sprintf("%s-controller-manager", projectName)
+
+			validSecret    types.NamespacedName
+			validMonitor   types.NamespacedName
+			expiredSecret  types.NamespacedName
+			expiredMonitor types.NamespacedName
 		)
 
-		BeforeEach(func() {
-			// Generate unique namespace name for each test to avoid conflicts
-			testNamespace = fmt.Sprintf("%s-%d", nsPrefix, time.Now().UnixNano())
+		validUntilMetricName := fmt.Sprintf(
+			"%s_%s_%s",
+			internalutils.PrometheusNamespace,
+			internalutils.PrometheusSubsystem,
+			internalutils.ValidUntilMetricName)
+		untilExpiryMetricName := fmt.Sprintf(
+			"%s_%s_%s",
+			internalutils.PrometheusNamespace,
+			internalutils.PrometheusSubsystem,
+			internalutils.UntilExpiryMetricName)
 
+		BeforeEach(func() {
+			h = utils.NewHelper(ctx, k8sClient)
 			By("creating test namespace: " + testNamespace)
 			ns := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{Name: testNamespace},
 			}
 			err := k8sClient.Create(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
+
+			validSecret = h.NsName("valid-secret", testNamespace)
+			validMonitor = h.NsName("valid-monitor", testNamespace)
+
+			By("creating a secret with future expiration date")
+			futureDate := time.Now().Add(20 * 24 * time.Hour).Format("2006-01-02")
+			secret := utils.GenerateFullSecret(validSecret, futureDate, []byte("fake-registry-token"))
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			By("creating a monitor resource")
+			monitor := utils.GenerateMonitor(validMonitor, validSecret)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+
+			By("waiting for monitor status to be updated")
+			h.ExpectStatusEventually(validMonitor, timeout, interval,
+				func(found *expiringsecretv1alpha1.Monitor) bool {
+					return found.Status.State == expiringsecretv1alpha1.MonitorStateInfo &&
+						found.Status.ExpiresAt != nil &&
+						found.Status.SecondsRemaining != nil &&
+						found.Status.LastChecked != nil
+				})
+
+			expiredSecret = h.NsName("expired-secret", testNamespace)
+			expiredMonitor = h.NsName("expired-monitor", testNamespace)
+
+			By("creating a secret with past expiration date")
+			pastDate := time.Now().Add(-5 * 24 * time.Hour).Format("2006-01-02")
+			secret = utils.GenerateFullSecret(expiredSecret, pastDate, []byte("expired-token"))
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			By("creating a monitor resource for secret with past expiration date")
+			monitor = utils.GenerateMonitor(expiredMonitor, expiredSecret)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+
+			By("waiting for monitor to detect expired state")
+			h.ExpectStatusEventually(expiredMonitor, timeout, interval,
+				func(found *expiringsecretv1alpha1.Monitor) bool {
+					return found.Status.State == expiringsecretv1alpha1.MonitorStateExpired
+				})
 		})
 
 		AfterEach(func() {
@@ -420,60 +435,23 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			_ = k8sClient.Delete(ctx, ns)
 		})
 
+		curl := func(url string) []byte {
+			cmd := exec.Command("kubectl", "run", "curl-metrics",
+				"--rm",
+				"-it",
+				"--restart=Never",
+				"--image=curlimages/curl:7.87.0",
+				"-n", namespace,
+				"--", "/bin/sh", "-c",
+				url,
+			)
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).NotTo(BeEmpty())
+			return output
+		}
+
 		It("should expose metrics endpoint", func() {
-			validSecret := types.NamespacedName{Name: "valid-secret", Namespace: testNamespace}
-			validMonitor := types.NamespacedName{Name: "valid-monitor", Namespace: testNamespace}
-
-			By("creating a secret with future expiration date")
-			futureDate := time.Now().Add(20 * 24 * time.Hour).Format("2006-01-02")
-			secret := utils.GenerateSecret(validSecret, futureDate, []byte("fake-registry-token"))
-			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-
-			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(validMonitor, "docker.io", validSecret, &expiringsecretv1alpha1.AlertThresholds{
-				InfoDays:     30,
-				WarningDays:  14,
-				CriticalDays: 7,
-			})
-			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
-
-			By("waiting for monitor status to be updated")
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, validMonitor, monitor)
-				if err != nil {
-					return false
-				}
-				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateInfo &&
-					monitor.Status.ExpiresAt != nil &&
-					monitor.Status.SecondsRemaining != nil &&
-					monitor.Status.LastChecked != nil
-			}, 30*time.Second, 2*time.Second).Should(BeTrue())
-
-			/////////
-
-			expiredSecret := types.NamespacedName{Name: "expired-secret", Namespace: testNamespace}
-			expiredMonitor := types.NamespacedName{Name: "expired-monitor", Namespace: testNamespace}
-
-			By("creating a secret with past expiration date")
-			pastDate := time.Now().Add(-5 * 24 * time.Hour).Format("2006-01-02")
-			secret = utils.GenerateSecret(expiredSecret, pastDate, []byte("expired-token"))
-			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-
-			By("creating a monitor resource for secret with past expiration date")
-			monitor = utils.GenerateMonitor(expiredMonitor, "quay.io", expiredSecret, nil)
-			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
-
-			By("waiting for monitor to detect expired state")
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, expiredMonitor, monitor)
-				if err != nil {
-					return false
-				}
-				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateExpired
-			}, 30*time.Second, 2*time.Second).Should(BeTrue())
-
-			/////////
-
 			By("creating cluster role binding for metrics access")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding",
 				crbName,
@@ -483,9 +461,9 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			_, _ = utils.Run(cmd)
 
 			By("creating serviceaccount token for authentication")
-			cmd = exec.Command("kubectl", "create", "token",
-				fmt.Sprintf("%s-controller-manager", projectName),
+			cmd = exec.Command("kubectl", "create", "token", managerName,
 				"-n", namespace,
+				"--duration=10m",
 			)
 			token, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -496,21 +474,31 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 				"https://%s.%s.svc.cluster.local:8443/metrics",
 				string(token), svcName, namespace)
 
-			cmd = exec.Command("kubectl", "run", "curl-metrics",
-				"--rm",
-				"-it",
-				"--restart=Never",
-				"--image=curlimages/curl:7.87.0",
-				"-n", namespace,
-				"--", "/bin/sh", "-c",
-				curlCommand,
-			)
-			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).NotTo(BeEmpty())
+			output := curl(curlCommand)
 
-			Expect(string(output)).To(ContainSubstring("expiringsecret_monitor_valid_until_timestamp_seconds"))
-			Expect(string(output)).To(ContainSubstring("expiringsecret_monitor_until_expiration_seconds"))
+			writeErr := os.WriteFile(
+				"/Users/txc/Projects/Stakater/expiring-secret/metrics_output.txt",
+				output, 0644)
+			Expect(writeErr).NotTo(HaveOccurred())
+
+			outputStr := string(output)
+
+			By("verifying that metrics output contains expected metric " + validUntilMetricName)
+			Expect(outputStr).To(
+				ContainSubstring(validUntilMetricName))
+
+			By("verifying that metrics output contains expected metric " + untilExpiryMetricName)
+			Expect(outputStr).To(
+				ContainSubstring(untilExpiryMetricName))
+
+			// Cleanup created resources
+
+			By("removing cluster role binding for metrics access")
+			cmd = exec.Command("kubectl", "delete", "clusterrolebinding",
+				crbName,
+			)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })
