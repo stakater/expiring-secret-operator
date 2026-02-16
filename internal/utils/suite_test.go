@@ -14,31 +14,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package utils
 
 import (
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/runtime"
-	// +kubebuilder:scaffold:imports
 )
 
-func TestMain(t *testing.T) {
+func TestTheUtils(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Main Suite")
+
+	RunSpecs(t, "Utils Suite")
 }
-
-var _ = Describe("Main", func() {
-	var (
-		scheme = runtime.NewScheme()
-	)
-
-	It("should not error", func() {
-		Expect(scheme).NotTo(BeNil())
-		Expect(expiringsecretv1alpha1.AddToScheme(scheme)).NotTo(HaveOccurred())
-	})
-
-})
