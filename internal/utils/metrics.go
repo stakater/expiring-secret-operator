@@ -138,7 +138,7 @@ func (m *Metric) Labels() prometheus.Labels {
 
 func (m *Metric) LabelValues() string {
 	metricLabels := m.Labels()
-	labelsString := []string{}
+	labelsString := make([]string, 0, len(metricLabels))
 	for k, v := range metricLabels {
 		labelsString = append(labelsString, fmt.Sprintf(`%s="%s"`, k, v))
 	}
