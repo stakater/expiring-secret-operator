@@ -3,3 +3,6 @@ package: expiring-secrets.stakater.com
 name: preview
 entries:
   - name: expiring-secrets.v0.0.1
+  - name: expiring-secret-operator.v0.0.2 # This is the next version to be released
+    skips:
+    - expiring-secrets.v0.0.1
