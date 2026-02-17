@@ -21,7 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
+	expiringsecretv1alpha1 "github.com/stakater/expiring-secrets/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	// +kubebuilder:scaffold:imports
 )

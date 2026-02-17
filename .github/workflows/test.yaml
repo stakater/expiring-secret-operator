@@ -1,0 +1,36 @@
+name: Check Coverage
+on:
+  push:
+    branches: 
+      - "master"
+  pull_request:
+    branches: 
+      - "master"
+
+jobs:
+  code_coverage:
+    name: "Code Coverage"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: 1.25.0
+
+    - name: Verify code
+      id: verify
+      uses: stakater/.github/.github/actions/operator/verify@main
+      with:
+        ENABLE_LINTING: false
+        ENABLE_UNIT_TESTS: true
+
+    - name: Check Code Coverage
+      id: coverage
+      uses: stakater/.github/.github/actions/operator/coverage@feature/code-coverage
+      #uses: stakater/.github/.github/workflows/pull_request_coverage.yaml@feature/code-coverage
+      with:
+        TARGET_BRANCH: master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -44,35 +44,19 @@ const (
 	// An error occurred while checking the secret (e.g., non-existent secret, API error)
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	MonitorStateError MonitorState = "Error"
-	// Something totally unknown happened (should be used very rarely, if at all)
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	MonitorStateUnknown MonitorState = "Unknown"
 )
 
-// MonitorConditionType represents the condition type for Monitor.
-type MonitorConditionType string
-
-const (
-	// MonitorConditionReady indicates that the output is ready.
-	MonitorConditionReady MonitorConditionType = "Ready"
-	// MonitorConditionSourceAvailable indicates that the source Secret is available.
-	MonitorConditionSourceAvailable MonitorConditionType = "SourceAvailable"
-	// MonitorConditionSourceLabel indicates that the source label has been found.
-	MonitorConditionSourceLabelFound MonitorConditionType = "SourceLabelFound"
-	// MonitorConditionSourceLabelValid indicates that the source label is valid.
-	MonitorConditionSourceLabelValid MonitorConditionType = "SourceLabelValid"
-)
-
-// Monitor CR spec field.
+// MonitorSpec defines the desired state of Monitor
 type MonitorSpec struct {
-	// Service that generated the secret content originally (e.g., docker.io, quay.io)
+	// Service that secret generated the secret content (e.g., docker.io, quay.io)
 	// +kubebuilder:validation:Required
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Service that generated the secret content",xDescriptors="urn:alm:descriptor:com.tectonic.ui:text"
 	Service string `json:"service"`
 
+	// SecretRef is a reference to the Kubernetes Secret containing the PAT
 	// +kubebuilder:validation:Required
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Secret Reference",xDescriptors={"urn:alm:descriptor:io.kubernetes:Secret"}
-	SecretRef *SecretReference `json:"secretRef"`
+	SecretRef SecretReference `json:"secretRef"`
 
 	// AlertThresholds defines when to trigger different alert levels
 	// +optional
@@ -80,10 +64,7 @@ type MonitorSpec struct {
 	AlertThresholds *AlertThresholds `json:"alertThresholds,omitempty"`
 }
 
-// Reference to a Secret to monitor.
-// It should contain a label with the expiration timestamp in "YYYY-MM-DD" format, e.g.:
-//
-//	expiringsecret.stakater.com/validUntil: "2025-12-31"
+// SecretReference represents a reference to a Kubernetes Secret
 type SecretReference struct {
 	// Name is the name of the secret
 	// +kubebuilder:validation:Required
@@ -97,8 +78,7 @@ type SecretReference struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// Define the thresholds for different alert levels
-// +optional
+// AlertThresholds defines the thresholds for different alert levels
 type AlertThresholds struct {
 	// InfoDays is the number of days before expiration to trigger info alerts
 	// +kubebuilder:validation:Minimum=1
@@ -122,7 +102,22 @@ type AlertThresholds struct {
 	CriticalDays int32 `json:"criticalDays,omitempty"`
 }
 
-// Monitor CR status field.
+func (a *AlertThresholds) ApplyDefaults() {
+	if a == nil {
+		a = &AlertThresholds{}
+	}
+	if a.InfoDays == 0 {
+		a.InfoDays = 30
+	}
+	if a.WarningDays == 0 {
+		a.WarningDays = 14
+	}
+	if a.CriticalDays == 0 {
+		a.CriticalDays = 7
+	}
+}
+
+// MonitorStatus defines the observed state of Monitor
 type MonitorStatus struct {
 	// ExpiresAt is the expiration timestamp of the monitored secret
 	// +kubebuilder:validation:Optional
@@ -151,18 +146,8 @@ type MonitorStatus struct {
 	Message string `json:"message,omitempty"`
 
 	// Conditions represent the latest available observations of the monitor's state
-	// +optional
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
-
-	// ObservedGeneration reflects the generation of the most recently observed monitor.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// LastSourceResourceVersion stores the last observed resourceVersion of the source Secret.
-	// +optional
-	LastSourceResourceVersion string `json:"lastSourceResourceVersion,omitempty"`
+	// +kubebuilder:validation:Optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

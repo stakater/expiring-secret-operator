@@ -33,7 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
+	expiringsecretv1alpha1 "github.com/stakater/expiring-secrets/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 

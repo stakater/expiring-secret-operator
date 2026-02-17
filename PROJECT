@@ -8,8 +8,8 @@ layout:
 plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
-projectName: expiring-secret-operator
-repo: github.com/stakater/expiring-secret-operator
+projectName: expiring-secrets
+repo: github.com/stakater/expiring-secrets
 resources:
 - api:
     crdVersion: v1
@@ -18,6 +18,6 @@ resources:
   domain: stakater.com
   group: expiring-secrets
   kind: Monitor
-  path: github.com/stakater/expiring-secret-operator/api/v1alpha1
+  path: github.com/stakater/expiring-secrets/api/v1alpha1
   version: v1alpha1
 version: "3"
