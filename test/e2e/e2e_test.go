@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -476,9 +477,10 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 			output := curl(curlCommand)
 
-			writeErr := os.WriteFile(
-				"/Users/txc/Projects/Stakater/expiring-secret/metrics_output.txt",
-				output, 0644)
+			dir, err := os.Getwd()
+			Expect(err).NotTo(HaveOccurred())
+			file := filepath.Join(dir, "metrics_output.txt")
+			writeErr := os.WriteFile(file, output, 0644)
 			Expect(writeErr).NotTo(HaveOccurred())
 
 			outputStr := string(output)
