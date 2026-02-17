@@ -437,18 +437,45 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 		})
 
 		curl := func(url string) []byte {
+			By("running curl pod to fetch metrics")
+			// Run pod without -it flags for CI compatibility
 			cmd := exec.Command("kubectl", "run", "curl-metrics",
-				"--rm",
-				"-it",
 				"--restart=Never",
 				"--image=curlimages/curl:7.87.0",
 				"-n", namespace,
 				"--", "/bin/sh", "-c",
 				url,
 			)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Wait for pod to complete (either Succeeded or Failed)
+			By("waiting for curl pod to complete")
+			cmd = exec.Command("kubectl", "wait",
+				"--for=jsonpath={.status.phase}=Succeeded",
+				"pod/curl-metrics",
+				"-n", namespace,
+				"--timeout=30s",
+			)
+			_, _ = utils.Run(cmd)
+
+			// Get logs from the pod
+			By("retrieving logs from curl pod")
+			cmd = exec.Command("kubectl", "logs", "curl-metrics",
+				"-n", namespace,
+			)
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).NotTo(BeEmpty())
+
+			// Delete the pod
+			By("deleting curl pod")
+			cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics",
+				"-n", namespace,
+				"--ignore-not-found=true",
+			)
+			_, _ = utils.Run(cmd)
+
 			return output
 		}
 
