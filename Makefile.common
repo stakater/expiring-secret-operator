@@ -920,7 +920,7 @@ common-bundle-push: ## Push the bundle image.
 common-catalog-render: opm yq generate-catalog-index ## Render bundle to catalog index.
 	@echo "$(FG_BLUE)>> $(FG_GREEN)Rendering catalog index with bundle images$(RESET)"
 	PATH="$(LOCALBIN):$$PATH" \
-	bash -c $(CATALOG_INDEX_SCRIPT) "$(DOCKER_REPO_BASE)" "$(OPERATOR_NAME)" "$(CATALOG_DIR_PATH)" "$(VERSION)" "$(GIT_TAG)"
+	bash $(CATALOG_INDEX_SCRIPT) "$(DOCKER_REPO_BASE)" "$(OPERATOR_NAME)" "$(CATALOG_DIR_PATH)" "$(VERSION)" "$(GIT_TAG)"
 
 # Build a catalog image by adding bundle images to an empty catalog using the operator package manager tool, 'opm'.
 # This recipe invokes 'opm' in 'semver' bundle add mode. For more information on add modes, see:
