@@ -27,3 +27,5 @@ go.work
 *.swp
 *.swo
 *~
+
+test/rules/rules.generated.yaml
