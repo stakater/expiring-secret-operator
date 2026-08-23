@@ -19,10 +19,13 @@ rules:
   verbs: ["get", "list", "watch"]
 - apiGroups: [""]
   resources:
+  # Only configmaps: Prometheus Operator (not the Prometheus pod) resolves
+  # authorization.credentials secretRefs at config-generation time and
+  # mounts the value into the pod, so the Prometheus process itself never
+  # calls the Secrets API. Do NOT add "secrets" here: cluster-wide
+  # secrets:get would let anyone with code execution or SSRF in this pod
+  # read every Secret in the cluster for a capability it doesn't use.
   - configmaps
-  # Reading the token Secret that the ServiceMonitor's authorization block
-  # references.
-  - secrets
   verbs: ["get"]
 - nonResourceURLs: ["/metrics"]
   verbs: ["get"]

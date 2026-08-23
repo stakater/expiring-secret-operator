@@ -76,6 +76,12 @@ test-rules: promtool ## Validate and unit-test the PrometheusRule alert rules.
 .PHONY: deploy-monitoring
 deploy-monitoring: kustomize ## Deploy a dev Prometheus into Kind to verify scraping.
 	$(KUSTOMIZE) build test/monitoring | $(KUBECTL) apply -f -
+	# prometheus-operator reconciles the Prometheus CR into a StatefulSet
+	# asynchronously, so it may not exist yet right after apply. Wait for it
+	# to be created before waiting on its rollout, or `rollout status` below
+	# races the reconcile and fails with a spurious NotFound on a fresh
+	# cluster.
+	$(KUBECTL) -n monitoring wait --for=create statefulset/prometheus-dev --timeout=120s
 	$(KUBECTL) -n monitoring rollout status statefulset/prometheus-dev --timeout=180s
 
 .PHONY: undeploy-monitoring
