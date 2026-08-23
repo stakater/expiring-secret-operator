@@ -73,4 +73,13 @@ test-rules: promtool ## Validate and unit-test the PrometheusRule alert rules.
 	@echo ">> running rule unit tests"
 	$(PROMTOOL) test rules test/rules/rule_test.yaml
 
+.PHONY: deploy-monitoring
+deploy-monitoring: kustomize ## Deploy a dev Prometheus into Kind to verify scraping.
+	$(KUSTOMIZE) build test/monitoring | $(KUBECTL) apply -f -
+	$(KUBECTL) -n monitoring rollout status statefulset/prometheus-dev --timeout=180s
+
+.PHONY: undeploy-monitoring
+undeploy-monitoring: kustomize ## Remove the dev Prometheus from Kind.
+	-$(KUSTOMIZE) build test/monitoring | $(KUBECTL) delete --ignore-not-found=true -f -
+
 include makefiles/common.mk
