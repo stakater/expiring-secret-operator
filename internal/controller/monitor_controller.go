@@ -188,8 +188,11 @@ func (r *MonitorReconciler) handleError(err error, reason string, message string
 
 	r.log.Info("Handling Monitor error", "reason", reason, "message", detailedMessage)
 
-	// Clean up metrics when monitor enters error state
-	utils.NewMetric(r.output).WithLogger(r.log).Cleanup()
+	// Drop the value gauges, whose expiry is unknown, but keep publishing the
+	// state so a failing Monitor stays alertable rather than going silent.
+	if err := utils.NewMetric(r.output).WithLogger(r.log).SetError(); err != nil {
+		r.log.Error(err, "Failed to publish error state metric", "monitor", r.output.Name)
+	}
 
 	// Always set Ready condition to False on error
 	r.updateCondition(expiringsecretv1alpha1.MonitorConditionReady, "False", reason, detailedMessage)

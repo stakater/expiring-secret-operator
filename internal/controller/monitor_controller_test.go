@@ -25,6 +25,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,11 +78,12 @@ func (e *errorClient) Get(ctx context.Context, key client.ObjectKey, obj client.
 }
 
 const (
-	MonitorNamespace = "default"
-	Service          = "docker.io"
-	TokenKey         = "token"
-	MonitorKind      = "Monitor"
-	TargetSecretName = "target-secret"
+	MonitorNamespace        = "default"
+	Service                 = "docker.io"
+	TokenKey                = "token"
+	MonitorKind             = "Monitor"
+	TargetSecretName        = "target-secret"
+	ErrorMetricsMonitorName = "error-metrics-monitor"
 )
 
 var _ = Describe("Monitor Controller", func() {
@@ -1353,6 +1355,93 @@ var _ = Describe("Monitor Controller", func() {
 
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: &expiringsecretv1alpha1.Monitor{}, ObjectNew: newSecret})).To(BeFalse())
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: &expiringsecretv1alpha1.Monitor{}})).To(BeFalse())
+		})
+	})
+
+	Context("Prometheus metrics", func() {
+		BeforeEach(func() {
+			utils.SecretValidUntilTimestamp.Reset()
+			utils.SecretSecondsUntilExpiry.Reset()
+			utils.MonitorStateGauge.Reset()
+		})
+
+		It("publishes all three series for a healthy Monitor", func() {
+			ctx := context.Background()
+			secret := testutils.GenerateValidDaysSecret(
+				types.NamespacedName{Name: "metrics-secret", Namespace: MonitorNamespace},
+				60,
+			)
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			monitor := testutils.GenerateMonitorService(
+				types.NamespacedName{Name: "metrics-monitor", Namespace: MonitorNamespace},
+				types.NamespacedName{Name: "metrics-secret", Namespace: MonitorNamespace},
+				Service,
+			)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+
+			reconciler := newReconciler()
+			name := types.NamespacedName{Name: "metrics-monitor", Namespace: MonitorNamespace}
+			// First pass adds the finalizer and defaults; the second
+			// populates status, which is what the metrics are built from.
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(testutil.CollectAndCount(utils.SecretValidUntilTimestamp)).To(Equal(1))
+			Expect(testutil.CollectAndCount(utils.SecretSecondsUntilExpiry)).To(Equal(1))
+			Expect(testutil.CollectAndCount(utils.MonitorStateGauge)).To(Equal(1))
+
+			By("removing every series once the Monitor is deleted")
+			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(testutil.CollectAndCount(utils.SecretValidUntilTimestamp)).To(Equal(0))
+			Expect(testutil.CollectAndCount(utils.SecretSecondsUntilExpiry)).To(Equal(0))
+			Expect(testutil.CollectAndCount(utils.MonitorStateGauge)).To(Equal(0))
+
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+
+		It("keeps a broken Monitor alertable via the state series", func() {
+			ctx := context.Background()
+			// No Secret is created, so the source lookup fails.
+			monitor := testutils.GenerateMonitorService(
+				types.NamespacedName{Name: ErrorMetricsMonitorName, Namespace: MonitorNamespace},
+				types.NamespacedName{Name: "absent-secret", Namespace: MonitorNamespace},
+				Service,
+			)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+
+			reconciler := newReconciler()
+			name := types.NamespacedName{Name: ErrorMetricsMonitorName, Namespace: MonitorNamespace}
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("dropping the value gauges, whose expiry is unknown")
+			Expect(testutil.CollectAndCount(utils.SecretValidUntilTimestamp)).To(Equal(0))
+			Expect(testutil.CollectAndCount(utils.SecretSecondsUntilExpiry)).To(Equal(0))
+
+			By("publishing the Error state so an alert can fire")
+			Expect(testutil.CollectAndCount(utils.MonitorStateGauge)).To(Equal(1))
+			metric, err := utils.MonitorStateGauge.GetMetricWith(prometheus.Labels{
+				utils.LabelMonitorName:      ErrorMetricsMonitorName,
+				utils.LabelMonitorNamespace: MonitorNamespace,
+				utils.LabelSecretName:       "absent-secret",
+				utils.LabelSecretNamespace:  MonitorNamespace,
+				utils.LabelSecretService:    Service,
+				utils.LabelState:            string(expiringsecretv1alpha1.MonitorStateError),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(testutil.ToFloat64(metric)).To(Equal(1.0))
+
+			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })
