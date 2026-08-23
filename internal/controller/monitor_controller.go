@@ -56,11 +56,12 @@ type MonitorReconciler struct {
 }
 
 const (
-	monitorFinalizer = "expiring-secrets.stakater.com/monitor-finalizer"
-	LabelKey         = "expiring-secrets.stakater.com/validUntil"
-	secretIsValid    = "Secret is valid until %s"
-	secretExpiresIn  = "Secret expires in less than %d days"
-	secretExpiredOn  = "Secret expired on %s"
+	monitorFinalizer        = "expiring-secrets.stakater.com/monitor-finalizer"
+	LabelKey                = "expiring-secrets.stakater.com/validUntil"
+	secretIsValid           = "Secret is valid until %s"
+	secretExpiresIn         = "Secret expires in less than %d days"
+	secretExpiredOn         = "Secret expired on %s"
+	SourceLabelNotAvailable = "SourceLabelNotAvailable"
 )
 
 type MonitorErrorReasonMessage struct {
@@ -202,7 +203,7 @@ func (r *MonitorReconciler) handleError(err error, reason string, message string
 	// while SourceLabelInvalid indicates that the label value is not in the
 	// expected format.
 	// Both conditions should be set accordingly based on the error reason.
-	if reason == "SourceLabelNotAvailable" {
+	if reason == SourceLabelNotAvailable {
 		r.updateCondition(expiringsecretv1alpha1.MonitorConditionSourceLabelFound, "False", reason, detailedMessage)
 	}
 	if reason == "SourceLabelInvalid" {
@@ -271,7 +272,7 @@ func (r *MonitorReconciler) parseSourceObject(sourceObj client.Object) (time.Tim
 		msg := fmt.Sprintf("Source object does not have any labels, expected %s label", LabelKey)
 		r.log.Error(nil, msg, "name", sourceObj.GetName(), "namespace", sourceObj.GetNamespace())
 		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  "SourceLabelNotAvailable",
+			Reason:  SourceLabelNotAvailable,
 			Message: msg,
 		}
 	}
@@ -285,7 +286,7 @@ func (r *MonitorReconciler) parseSourceObject(sourceObj client.Object) (time.Tim
 			"expectedLabel", LabelKey,
 		)
 		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  "SourceLabelNotAvailable",
+			Reason:  SourceLabelNotAvailable,
 			Message: msg,
 		}
 	}

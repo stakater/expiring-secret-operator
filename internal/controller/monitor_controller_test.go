@@ -76,6 +76,14 @@ func (e *errorClient) Get(ctx context.Context, key client.ObjectKey, obj client.
 	return e.Client.Get(ctx, key, obj, opts...)
 }
 
+const (
+	MonitorNamespace = "default"
+	Service          = "docker.io"
+	TokenKey         = "token"
+	MonitorKind      = "Monitor"
+	TargetSecretName = "target-secret"
+)
+
 var _ = Describe("Monitor Controller", func() {
 	newReconciler := func() *MonitorReconciler {
 		return &MonitorReconciler{
@@ -1005,14 +1013,14 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-monitor",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
 						Name:      "test-secret",
-						Namespace: "default",
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 				Status: expiringsecretv1alpha1.MonitorStatus{
 					State:     expiringsecretv1alpha1.MonitorStateWarning,
@@ -1029,10 +1037,10 @@ var _ = Describe("Monitor Controller", func() {
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "no-label-secret",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 				},
 				Data: map[string][]byte{
-					"token": []byte("fake-token"),
+					TokenKey: []byte("fake-token"),
 				},
 			}
 
@@ -1045,13 +1053,13 @@ var _ = Describe("Monitor Controller", func() {
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-date-secret",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 					Labels: map[string]string{
 						"validUntil": "not-a-date",
 					},
 				},
 				Data: map[string][]byte{
-					"token": []byte("fake-token"),
+					TokenKey: []byte("fake-token"),
 				},
 			}
 
@@ -1079,18 +1087,18 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "requeue-monitor",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "target-secret",
-						Namespace: "default",
+						Name:      TargetSecretName,
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 			}
 
@@ -1117,7 +1125,7 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "delete-monitor",
@@ -1126,10 +1134,10 @@ var _ = Describe("Monitor Controller", func() {
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "target-secret",
-						Namespace: "default",
+						Name:      TargetSecretName,
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 			}
 
@@ -1151,7 +1159,7 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "delete-monitor-error",
@@ -1160,10 +1168,10 @@ var _ = Describe("Monitor Controller", func() {
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "target-secret",
-						Namespace: "default",
+						Name:      TargetSecretName,
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 			}
 			controllerutil.AddFinalizer(monitor, monitorFinalizer)
@@ -1190,16 +1198,16 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "source-error-monitor",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
 						Name:      "missing-secret",
-						Namespace: "default",
+						Namespace: MonitorNamespace,
 					},
 				},
 			}
@@ -1244,25 +1252,25 @@ var _ = Describe("Monitor Controller", func() {
 				Scheme: scheme,
 			}
 
-			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "secret", Namespace: "default"}}
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "secret", Namespace: MonitorNamespace}}
 			requests := reconciler.mapSecretToMonitor(ctx, secret)
 			Expect(requests).To(BeNil())
 		})
 
 		It("should default secret namespace when secretRef namespace is empty", func() {
-			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "mapped-secret", Namespace: "default"}}
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "mapped-secret", Namespace: MonitorNamespace}}
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
-				ObjectMeta: metav1.ObjectMeta{Name: "mapped-monitor", Namespace: "default"},
+				ObjectMeta: metav1.ObjectMeta{Name: "mapped-monitor", Namespace: MonitorNamespace},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
 						Name:      secret.Name,
 						Namespace: "",
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 			}
 
@@ -1281,15 +1289,15 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
-				ObjectMeta: metav1.ObjectMeta{Name: "metric-error", Namespace: "default"},
+				ObjectMeta: metav1.ObjectMeta{Name: "metric-error", Namespace: MonitorNamespace},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "target-secret",
-						Namespace: "default",
+						Name:      TargetSecretName,
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 				Status: expiringsecretv1alpha1.MonitorStatus{
 					State:            expiringsecretv1alpha1.MonitorStateValid,
@@ -1339,14 +1347,14 @@ var _ = Describe("Monitor Controller", func() {
 		})
 
 		It("should evaluate secret update predicate", func() {
-			oldSecret := &corev1.Secret{Data: map[string][]byte{"token": []byte("a")}}
-			newSecret := &corev1.Secret{Data: map[string][]byte{"token": []byte("a")}}
+			oldSecret := &corev1.Secret{Data: map[string][]byte{TokenKey: []byte("a")}}
+			newSecret := &corev1.Secret{Data: map[string][]byte{TokenKey: []byte("a")}}
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: newSecret})).To(BeFalse())
 
 			newSecret.Data["token"] = []byte("b")
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: newSecret})).To(BeTrue())
 
-			newSecret.Data = map[string][]byte{"token": []byte("a"), "extra": []byte("c")}
+			newSecret.Data = map[string][]byte{TokenKey: []byte("a"), "extra": []byte("c")}
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: newSecret})).To(BeTrue())
 
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: &expiringsecretv1alpha1.Monitor{}, ObjectNew: newSecret})).To(BeFalse())
