@@ -23,6 +23,67 @@ For local development and testing, you can build and push the operator image dir
    make catalog-render catalog-build catalog-push
    ```
 
+## Monitoring
+
+The operator serves metrics on `:8443` over HTTPS, protected by the
+manager's authn/authz filter. A `ServiceMonitor` and a `PrometheusRule` ship
+with the default kustomization, along with a `metrics-reader` ServiceAccount
+whose token the ServiceMonitor presents when scraping.
+
+### OpenShift
+
+Metrics are collected by user-workload monitoring, which auto-discovers
+`ServiceMonitor` and `PrometheusRule` resources in user namespaces. No
+namespace label is needed. In particular, do **not** add
+`openshift.io/cluster-monitoring: "true"` — that selects platform
+monitoring, which is reserved for platform operators in `openshift-*`
+namespaces.
+
+User-workload monitoring must be enabled once, by a cluster administrator.
+This is deliberately not shipped as a manifest: `cluster-monitoring-config`
+is a cluster singleton, and applying it from our kustomization would clobber
+unrelated cluster configuration.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    enableUserWorkload: true
+```
+
+Verify the operator is being scraped:
+
+```sh
+oc -n openshift-user-workload-monitoring get pods
+oc get servicemonitor -n expiring-secret-operator-system
+```
+
+The ServiceMonitor authenticates with `authorization.credentials`, not
+`bearerTokenFile`. User-workload monitoring sets
+`arbitraryFSAccessThroughSMs: deny`, which rejects any ServiceMonitor that
+reads a path from the Prometheus container's filesystem, so
+`bearerTokenFile` fails there even though it works elsewhere. The same
+constraint applies to TLS: a CA must be supplied as `tlsConfig.ca.secret`
+rather than `caFile`.
+
+### Local Kind cluster
+
+The Prometheus Operator is installed by `make install-dependencies`, but it
+only provides CRDs. To run an actual Prometheus and confirm scraping works:
+
+```sh
+make deploy
+make deploy-monitoring
+kubectl -n monitoring port-forward svc/prometheus-operated 9090:9090
+```
+
+Then open <http://localhost:9090/targets> and check that the
+`controller-manager-metrics-service` target is `UP`.
+
 ## CI/CD Deployment
 For automated builds and releases via CI/CD pipelines, the version is bumped based on the latest release tag rather than the `Makefile` settings.
 
