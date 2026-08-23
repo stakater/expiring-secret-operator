@@ -30,6 +30,19 @@ manager's authn/authz filter. A `ServiceMonitor` and a `PrometheusRule` ship
 with the default kustomization, along with a `metrics-reader` ServiceAccount
 whose token the ServiceMonitor presents when scraping.
 
+> **Warning:** `config/rbac/metrics_reader_token.yaml` hardcodes the
+> `namePrefix` from `config/default/kustomization.yaml` in its
+> `kubernetes.io/service-account.name` annotation, because kustomize
+> rewrites resource *names* but never the contents of an annotation
+> *value*. If you change `namePrefix`, this annotation is not updated to
+> match, the token Secret is never populated for the renamed
+> ServiceAccount, and scrapes will silently fail with 401 — the operator's
+> own metrics endpoint looks fine, you just get no series in Prometheus.
+> Also note the token is populated asynchronously by the built-in
+> ServiceAccount token controller on first apply, so a brief window where
+> Prometheus can't yet authenticate right after a fresh deploy is normal
+> and not a sign of misconfiguration.
+
 ### OpenShift
 
 Metrics are collected by user-workload monitoring, which auto-discovers
