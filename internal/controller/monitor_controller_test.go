@@ -1365,6 +1365,16 @@ var _ = Describe("Monitor Controller", func() {
 			utils.MonitorStateGauge.Reset()
 		})
 
+		AfterEach(func() {
+			// Guarantee the reset runs even if a spec fails partway through
+			// and its own trailing cleanup code never executes, so orphaned
+			// series never leak into later specs sharing these package-level
+			// gauges.
+			utils.SecretValidUntilTimestamp.Reset()
+			utils.SecretSecondsUntilExpiry.Reset()
+			utils.MonitorStateGauge.Reset()
+		})
+
 		It("publishes all three series for a healthy Monitor", func() {
 			ctx := context.Background()
 			secret := testutils.GenerateValidDaysSecret(
