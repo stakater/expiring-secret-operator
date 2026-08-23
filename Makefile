@@ -12,7 +12,7 @@ TEST_ARGS ?= -v -test.v -ginkgo.v
 #all: precheck style check_license lint build coverage
 
 .PHONY: pre-commit
-pre-commit: precheck check_license fmt vet lint
+pre-commit: precheck check_license fmt vet lint test-rules
 
 .PHONY: e2e
 e2e: undeploy gh-action test-e2e
@@ -48,20 +48,20 @@ PROMTOOL_VERSION ?= v3.9.1
 
 .PHONY: promtool
 promtool: ## Download promtool locally if necessary.
-ifeq (,$(wildcard $(PROMTOOL)))
-	@mkdir -p $(LOCALBIN)
-	@echo ">> installing promtool $(PROMTOOL_VERSION) to $(PROMTOOL)"
-	@OS=$$(go env GOOS) && ARCH=$$(go env GOARCH) && \
-	tmpdir=$$(mktemp -d) && \
-	pkg="prometheus-$(PROMTOOL_VERSION:v%=%).$${OS}-$${ARCH}" && \
-	curl -fsSL "https://github.com/prometheus/prometheus/releases/download/$(PROMTOOL_VERSION)/$${pkg}.tar.gz" -o $$tmpdir/promtool.tar.gz && \
-	tar -xzf $$tmpdir/promtool.tar.gz -C $$tmpdir && \
-	cp $$tmpdir/$${pkg}/promtool $(PROMTOOL) && \
-	chmod +x $(PROMTOOL) && \
-	rm -rf $$tmpdir
-else
-	@echo ">> promtool already exists at $(PROMTOOL)"
-endif
+	@if [ -f "$(PROMTOOL)" ]; then \
+		echo ">> promtool already exists at $(PROMTOOL)"; \
+	else \
+		mkdir -p $(LOCALBIN); \
+		echo ">> installing promtool $(PROMTOOL_VERSION) to $(PROMTOOL)"; \
+		OS=$$(go env GOOS) && ARCH=$$(go env GOARCH) && \
+		tmpdir=$$(mktemp -d) && \
+		pkg="prometheus-$(PROMTOOL_VERSION:v%=%).$${OS}-$${ARCH}" && \
+		curl -fsSL "https://github.com/prometheus/prometheus/releases/download/$(PROMTOOL_VERSION)/$${pkg}.tar.gz" -o $$tmpdir/promtool.tar.gz && \
+		tar -xzf $$tmpdir/promtool.tar.gz -C $$tmpdir && \
+		cp $$tmpdir/$${pkg}/promtool $(PROMTOOL) && \
+		chmod +x $(PROMTOOL) && \
+		rm -rf $$tmpdir; \
+	fi
 
 .PHONY: test-rules
 test-rules: promtool ## Validate and unit-test the PrometheusRule alert rules.
