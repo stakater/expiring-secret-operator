@@ -61,7 +61,7 @@ const (
 	secretIsValid           = "Secret is valid until %s"
 	secretExpiresIn         = "Secret expires in less than %d days"
 	secretExpiredOn         = "Secret expired on %s"
-	SourceLabelNotAvailable = "SourceLabelNotAvailable"
+	sourceLabelNotAvailable = "sourceLabelNotAvailable"
 )
 
 type MonitorErrorReasonMessage struct {
@@ -199,11 +199,11 @@ func (r *MonitorReconciler) handleError(err error, reason string, message string
 		r.updateCondition(expiringsecretv1alpha1.MonitorConditionSourceAvailable, "False", reason, detailedMessage)
 	}
 
-	// SourceLabelNotAvailable indicates that the expected label is missing,
+	// sourceLabelNotAvailable indicates that the expected label is missing,
 	// while SourceLabelInvalid indicates that the label value is not in the
 	// expected format.
 	// Both conditions should be set accordingly based on the error reason.
-	if reason == SourceLabelNotAvailable {
+	if reason == sourceLabelNotAvailable {
 		r.updateCondition(expiringsecretv1alpha1.MonitorConditionSourceLabelFound, "False", reason, detailedMessage)
 	}
 	if reason == "SourceLabelInvalid" {
@@ -272,7 +272,7 @@ func (r *MonitorReconciler) parseSourceObject(sourceObj client.Object) (time.Tim
 		msg := fmt.Sprintf("Source object does not have any labels, expected %s label", LabelKey)
 		r.log.Error(nil, msg, "name", sourceObj.GetName(), "namespace", sourceObj.GetNamespace())
 		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  SourceLabelNotAvailable,
+			Reason:  sourceLabelNotAvailable,
 			Message: msg,
 		}
 	}
@@ -286,7 +286,7 @@ func (r *MonitorReconciler) parseSourceObject(sourceObj client.Object) (time.Tim
 			"expectedLabel", LabelKey,
 		)
 		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  SourceLabelNotAvailable,
+			Reason:  sourceLabelNotAvailable,
 			Message: msg,
 		}
 	}

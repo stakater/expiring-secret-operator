@@ -118,11 +118,9 @@ var _ = Describe("Monitor Controller", func() {
 
 	Context("When reconciling a Monitor resource", func() {
 		const (
-			MonitorName      = "test-monitor"
-			MonitorNamespace = "default"
-			SecretName       = "test-secret"
-			SecretNamespace  = "default"
-			Service          = "docker.io"
+			MonitorName     = "test-monitor"
+			SecretName      = "test-secret"
+			SecretNamespace = "default"
 
 			timeout         = time.Second * 10
 			interval        = time.Millisecond * 250
@@ -399,11 +397,9 @@ var _ = Describe("Monitor Controller", func() {
 
 	Context("Can handle invalid values", func() {
 		const (
-			MonitorName      = "test-monitor"
-			MonitorNamespace = "default"
-			SecretName       = "test-secret"
-			SecretNamespace  = "default"
-			Service          = "docker.io"
+			MonitorName     = "test-monitor"
+			SecretName      = "test-secret"
+			SecretNamespace = "default"
 
 			timeout         = time.Second * 10
 			interval        = time.Millisecond * 250
@@ -547,11 +543,9 @@ var _ = Describe("Monitor Controller", func() {
 
 	Context("When verifying metrics cleanup", func() {
 		const (
-			MonitorName      = "test-monitor"
-			MonitorNamespace = "default"
-			SecretName       = "test-secret"
-			SecretNamespace  = "default"
-			Service          = "docker.io"
+			MonitorName     = "test-monitor"
+			SecretName      = "test-secret"
+			SecretNamespace = "default"
 
 			timeout         = time.Second * 10
 			interval        = time.Millisecond * 250
