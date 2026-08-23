@@ -71,6 +71,15 @@ var _ = BeforeSuite(func() {
 			fmt.Sprintf("1.31.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
 	}
 
+	// kube-apiserver autodetects its external address when
+	// --advertise-address is unset. Inside a container whose default route is
+	// IPv6 it picks the IPv6 address, then refuses to start because envtest
+	// defaults --service-cluster-ip-range to the IPv4 10.0.0.0/24:
+	//   service IP family "10.0.0.0/24" must match public address family
+	// Pinning the advertise address to IPv4 loopback keeps both on one family.
+	testEnv.ControlPlane.GetAPIServer().Configure().
+		Set("advertise-address", "127.0.0.1")
+
 	var err error
 	// cfg is defined in this file globally.
 	cfg, err = testEnv.Start()
