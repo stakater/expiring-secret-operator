@@ -18,14 +18,17 @@ package e2e
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -378,6 +381,11 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			internalutils.PrometheusNamespace,
 			internalutils.PrometheusSubsystem,
 			internalutils.UntilExpiryMetricName)
+		stateMetricName := fmt.Sprintf(
+			"%s_%s_%s",
+			internalutils.PrometheusNamespace,
+			internalutils.PrometheusSubsystem,
+			internalutils.StateMetricName)
 
 		BeforeEach(func() {
 			h = utils.NewHelper(ctx, k8sClient)
@@ -434,6 +442,17 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 				ObjectMeta: metav1.ObjectMeta{Name: testNamespace},
 			}
 			_ = k8sClient.Delete(ctx, ns)
+
+			// Namespace deletion is asynchronous. This Context now has more
+			// than one It, so the next spec's BeforeEach tries to recreate
+			// this same namespace name; without waiting for the delete to
+			// finish first, that create races the finalizer/GC and fails
+			// with "object is being deleted: namespaces ... already exists".
+			By("waiting for test namespace to be fully deleted")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: testNamespace}, &corev1.Namespace{})
+				return apierrors.IsNotFound(err)
+			}, timeout, interval).Should(BeTrue())
 		})
 
 		curl := func(url string) []byte {
@@ -520,6 +539,24 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(outputStr).To(
 				ContainSubstring(untilExpiryMetricName))
 
+			By("verifying that metrics output contains expected metric " + stateMetricName)
+			Expect(outputStr).To(
+				ContainSubstring(stateMetricName))
+
+			By("verifying the state label is absent from the value gauges")
+			// state moved to its own metric; if it reappears here the
+			// stale-series bug is back.
+			valueGaugeLinesSeen := 0
+			for _, line := range strings.Split(outputStr, "\n") {
+				if strings.HasPrefix(line, validUntilMetricName+"{") ||
+					strings.HasPrefix(line, untilExpiryMetricName+"{") {
+					valueGaugeLinesSeen++
+					Expect(line).NotTo(ContainSubstring("state="))
+				}
+			}
+			Expect(valueGaugeLinesSeen).To(BeNumerically(">", 0),
+				"expected at least one value-gauge line to inspect for the state label")
+
 			// Cleanup created resources
 
 			By("removing cluster role binding for metrics access")
@@ -528,6 +565,35 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should be scraped successfully by Prometheus", func() {
+			By("checking whether a dev Prometheus is deployed")
+			cmd := exec.Command("kubectl", "get", "prometheus", "dev",
+				"-n", "monitoring", "--ignore-not-found=true", "-o", "name")
+			out, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			if len(strings.TrimSpace(string(out))) == 0 {
+				Skip("no dev Prometheus deployed; run `make deploy-monitoring` first")
+			}
+
+			By("waiting out one Prometheus scrape interval so the target is fresh")
+			time.Sleep(40 * time.Second)
+
+			By("querying the scrape target's up metric via the Prometheus HTTP API")
+			// svcName is exactly the job label Prometheus Operator assigns to
+			// this ServiceMonitor target. The query is URL-encoded so it can
+			// be embedded in the curl command string handed to /bin/sh -c
+			// without the embedded PromQL quotes/braces breaking shell
+			// parsing.
+			query := fmt.Sprintf(`up{job="%s"}`, svcName)
+			curlCommand := fmt.Sprintf(
+				`curl -s "http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/query?query=%s"`,
+				url.QueryEscape(query))
+
+			output := curl(curlCommand)
+
+			Expect(string(output)).To(ContainSubstring(`"value":`))
 		})
 	})
 })
