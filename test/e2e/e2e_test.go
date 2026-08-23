@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -569,12 +570,20 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 		It("should be scraped successfully by Prometheus", func() {
 			By("checking whether a dev Prometheus is deployed")
+			// kubectl's --ignore-not-found only suppresses a 404 for a
+			// missing *instance* of an existing resource type. If the
+			// Prometheus CRD itself is not installed (e.g. a fresh Kind
+			// cluster that never ran `make deploy-monitoring`), the same
+			// command instead errors with "the server doesn't have a
+			// resource type ...", which utils.Run turns into a non-nil
+			// error. Both cases mean "no dev Prometheus available" and
+			// must both be treated as a reason to Skip, not to fail.
 			cmd := exec.Command("kubectl", "get", "prometheus", "dev",
 				"-n", "monitoring", "--ignore-not-found=true", "-o", "name")
 			out, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			if len(strings.TrimSpace(string(out))) == 0 {
-				Skip("no dev Prometheus deployed; run `make deploy-monitoring` first")
+			if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+				Skip("no dev Prometheus deployed (or its CRD is not installed); " +
+					"run `make deploy-monitoring` first")
 			}
 
 			By("waiting out one Prometheus scrape interval so the target is fresh")
@@ -593,7 +602,21 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 			output := curl(curlCommand)
 
-			Expect(string(output)).To(ContainSubstring(`"value":`))
+			By("verifying the target was actually scraped successfully (up == 1)")
+			// The instant-query API returns the same "value" shape whether
+			// the target is up or down: "value":[<timestamp>,"0"] vs
+			// "value":[<timestamp>,"1"]. Asserting mere presence of
+			// `"value":` would pass even with the target down (e.g. a 401
+			// on every scrape), which is exactly the regression this spec
+			// exists to catch. Extract the sample's string value and
+			// require it to be "1".
+			valueRe := regexp.MustCompile(`"value":\[\s*[0-9.eE+-]+\s*,\s*"([^"]+)"\s*\]`)
+			matches := valueRe.FindStringSubmatch(string(output))
+			Expect(matches).To(HaveLen(2),
+				"expected a Prometheus vector result with a value in the response, got: %s", string(output))
+			Expect(matches[1]).To(Equal("1"),
+				"expected up==1 (target successfully scraped), got up==%s; full response: %s",
+				matches[1], string(output))
 		})
 	})
 })
