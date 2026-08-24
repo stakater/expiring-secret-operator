@@ -1,0 +1,17 @@
+# Helm template overrides
+# Applied after helmify generates the chart
+#
+# Format:
+#   <filename>:
+#     - search: "<pattern>"
+#       replace: "<replacement>"
+#       regex: true/false (optional, default false)
+#
+# Note: Use \n for newlines in multi-line replacements
+
+#deployment.yaml:
+#  - search: "name: cloud-orchestrator-gateway-controller-manager"
+#    replace: "name: {{ include \"cloud-orchestrator-gateway.fullname\" . }}-controller-manager"
+#  - search: "\\s*app\\.kubernetes\\.io/name: cloud-orchestrator-gateway"
+#    replace: ''
+#    regex: true
