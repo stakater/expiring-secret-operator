@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "local>stakater-ab/.github:renovate-config",
+    "local>stakater/.github:renovate-config",
     "config:best-practices",
     ":semanticCommits"
   ],
