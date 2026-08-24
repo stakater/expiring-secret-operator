@@ -345,10 +345,7 @@ common-uninstall-dependencies: $(foreach var,$(DEPENDENCIES),uninstall-$(var))
 
 ##@ Helm
 
-HELM_CHART_DIR ?= charts/$(OPERATOR_NAME)
-HELM_VERSION ?= $(VERSION)$(GIT_TAG)
 HELM_REGISTRY ?= $(DOCKER_REPO_BASE)/charts
-HELM_CHART_NAME ?= $(OPERATOR_NAME)
 HELM_MK_URL ?= https://raw.githubusercontent.com/stakater/.github/refs/heads/main/.github/makefiles/helm.mk
 HELM_MK := makefiles/helm.mk
 
@@ -377,7 +374,7 @@ common-helm-release: manifests kustomize helmify-bin yq download-helm-mk ## Down
 		GIT_TOKEN=$(GHCR_TOKEN) \
 		GIT_USER=$(GHCR_USERNAME) \
 		KUSTOMIZE=$(KUSTOMIZE) \
-		HELM_CHART_NAME=$(HELM_CHART_NAME) \
+		HELM_CHART_NAME=$(OPERATOR_NAME) \
 		HELMIFY_ARGS="-original-name" \
 		HELM_REGISTRY=$(HELM_REGISTRY) \
 		IMG=$(IMG)
@@ -599,21 +596,32 @@ HELMIFY ?= $(LOCALBIN)/helmify
 KIND ?= $(LOCALBIN)/kind
 
 ## Tool Versions
-KUSTOMIZE_VERSION ?= v5.8.1
-GOVULNCHECK_VERSION ?= latest
-#CONTROLLER_TOOLS_VERSION ?= v0.16.1
-CONTROLLER_TOOLS_VERSION ?= v0.20.1
-ENVTEST_VERSION ?= release-0.19
-GOLANGCI_LINT_VERSION ?= v2.9.0
-HELM_VERSION ?= v3.19.0
-HELMIFY_VERSION ?= v0.4.19
-GOTESTCOVERAGE_VERSION ?= latest
-KIND_VERSION ?= v0.31.0
 
+# renovate: datasource=go depName=sigs.k8s.io/kustomize/kustomize/v5
+KUSTOMIZE_VERSION ?= v5.8.1
+# renovate: datasource=go depName=sigs.k8s.io/controller-tools/cmd/controller-gen
+CONTROLLER_TOOLS_VERSION ?= v0.20.1
+# renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest
+ENVTEST_VERSION ?= release-0.19
+# renovate: datasource=go depName=github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+GOLANGCI_LINT_VERSION ?= v2.9.0
+# renovate: datasource=go depName=github.com/arttor/helmify/cmd/helmify
+HELMIFY_VERSION ?= v0.4.19
+# renovate: datasource=go depName=sigs.k8s.io/kind
+KIND_VERSION ?= v0.31.0
+# renovate: datasource=go depName=golang.org/x/vuln/cmd/govulncheck
+GOVULNCHECK_VERSION ?= latest
+# renovate: datasource=go depName=github.com/vladopajic/go-test-coverage/v2
+GOTESTCOVERAGE_VERSION ?= latest
+HELM_VERSION ?= v3.19.0
+
+# renovate: datasource=github-releases depName=prometheus-operator/prometheus-operator
 PROMETHEUS_OPERATOR_VERSION ?= v0.72.0
 PO_BUNDLE_URL := https://github.com/prometheus-operator/prometheus-operator/releases/download/$(PROMETHEUS_OPERATOR_VERSION)/bundle.yaml
+# renovate: datasource=github-releases depName=jetstack/cert-manager
 CERTMANAGER_VERSION ?= v1.14.4
 CM_URL := https://github.com/jetstack/cert-manager/releases/download/$(CERTMANAGER_VERSION)/cert-manager.yaml
+# renovate: datasource=github-releases depName=kubernetes-sigs/gateway-api
 GATEWAY_VERSION ?= v1.4.1
 
 GO_TOOLCHAIN ?= go1.25.0
