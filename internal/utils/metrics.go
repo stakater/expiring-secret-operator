@@ -39,6 +39,9 @@ const (
 	UntilExpiryMetricHelp = "Seconds until secret expires"
 	UntilExpiryMetricName = "until_expiration_seconds"
 
+	StateMetricHelp = "Current state of the Monitor, always 1 for the active state"
+	StateMetricName = "state"
+
 	LabelMonitorName      = "monitor_name"
 	LabelMonitorNamespace = "monitor_namespace"
 	LabelState            = "state"
@@ -48,14 +51,20 @@ const (
 )
 
 var (
-	labels = []string{
+	// valueLabels identify a Monitor and describe the Secret it watches.
+	// state is deliberately absent: it changes over a Monitor's lifetime,
+	// and a changing label value orphans the series recorded under the
+	// previous value.
+	valueLabels = []string{
 		LabelMonitorName,
 		LabelMonitorNamespace,
-		LabelState,
 		LabelSecretService,
 		LabelSecretName,
 		LabelSecretNamespace,
 	}
+
+	// stateLabels carry the same identity plus the state itself.
+	stateLabels = append(append([]string{}, valueLabels...), LabelState)
 
 	SecretValidUntilTimestamp = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -64,7 +73,7 @@ var (
 			Name:      ValidUntilMetricName,
 			Help:      ValidUntilMetricHelp,
 		},
-		labels,
+		valueLabels,
 	)
 
 	SecretSecondsUntilExpiry = prometheus.NewGaugeVec(
@@ -74,13 +83,27 @@ var (
 			Name:      UntilExpiryMetricName,
 			Help:      UntilExpiryMetricHelp,
 		},
-		labels,
+		valueLabels,
+	)
+
+	MonitorStateGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: PrometheusNamespace,
+			Subsystem: PrometheusSubsystem,
+			Name:      StateMetricName,
+			Help:      StateMetricHelp,
+		},
+		stateLabels,
 	)
 )
 
 func init() {
 	// Register custom metrics with the global prometheus registry
-	metrics.Registry.MustRegister(SecretValidUntilTimestamp, SecretSecondsUntilExpiry)
+	metrics.Registry.MustRegister(
+		SecretValidUntilTimestamp,
+		SecretSecondsUntilExpiry,
+		MonitorStateGauge,
+	)
 }
 
 type Metric struct {
@@ -100,40 +123,56 @@ func (m *Metric) WithLogger(logger logr.Logger) *Metric {
 	return m
 }
 
+// Labels returns the label set shared by the two value gauges. It carries no
+// state label; see StateLabels.
 func (m *Metric) Labels() prometheus.Labels {
 	if m == nil || m.monitor == nil {
 		return prometheus.Labels{}
 	}
 
-	// Determine the actual secret namespace (defaulting logic)
-	secretNamespace := m.monitor.Spec.SecretRef.Namespace
+	secretName := ""
+	secretNamespace := ""
+	if m.monitor.Spec.SecretRef != nil {
+		secretName = m.monitor.Spec.SecretRef.Name
+		secretNamespace = m.monitor.Spec.SecretRef.Namespace
+	}
+	// An empty secretRef namespace means the Monitor's own namespace, which
+	// is the same defaulting the reconciler applies when resolving it.
 	if secretNamespace == "" {
 		secretNamespace = m.monitor.Namespace
 	}
 
-	metricLabels := prometheus.Labels{
+	return prometheus.Labels{
 		LabelMonitorName:      m.monitor.Name,
 		LabelMonitorNamespace: m.monitor.Namespace,
-		LabelState:            "",
-		LabelSecretService:    "",
-		LabelSecretName:       "",
-		LabelSecretNamespace:  "",
+		LabelSecretName:       secretName,
+		LabelSecretNamespace:  secretNamespace,
+		LabelSecretService:    m.monitor.Spec.Service,
 	}
+}
 
-	if m.monitor.Spec.SecretRef.Name != "" {
-		metricLabels[LabelSecretName] = m.monitor.Spec.SecretRef.Name
+// StateLabels returns the label set for the state gauge.
+func (m *Metric) StateLabels() prometheus.Labels {
+	labels := m.Labels()
+	if m == nil || m.monitor == nil {
+		return labels
 	}
-	if secretNamespace != "" {
-		metricLabels[LabelSecretNamespace] = secretNamespace
-	}
-	if m.monitor.Spec.Service != "" {
-		metricLabels[LabelSecretService] = m.monitor.Spec.Service
-	}
-	if m.monitor.Status.State != "" {
-		metricLabels[LabelState] = string(m.monitor.Status.State)
-	}
+	labels[LabelState] = string(m.monitor.Status.State)
+	return labels
+}
 
-	return metricLabels
+// identityLabels scope a deletion to one Monitor, whatever its descriptive
+// labels currently say. Deleting by full label match is what allows orphans:
+// once a value has changed, the exact-match delete looks for the wrong
+// series and silently misses.
+func (m *Metric) identityLabels() prometheus.Labels {
+	if m == nil || m.monitor == nil {
+		return prometheus.Labels{}
+	}
+	return prometheus.Labels{
+		LabelMonitorName:      m.monitor.Name,
+		LabelMonitorNamespace: m.monitor.Namespace,
+	}
 }
 
 func (m *Metric) LabelValues() string {
@@ -146,32 +185,83 @@ func (m *Metric) LabelValues() string {
 	return strings.Join(labelsString, ",")
 }
 
+// reset drops every series belonging to this Monitor and reports how many
+// were removed.
+func (m *Metric) reset() int {
+	identity := m.identityLabels()
+	if len(identity) == 0 {
+		return 0
+	}
+	deleted := SecretValidUntilTimestamp.DeletePartialMatch(identity)
+	deleted += SecretSecondsUntilExpiry.DeletePartialMatch(identity)
+	deleted += MonitorStateGauge.DeletePartialMatch(identity)
+	return deleted
+}
+
 func (m *Metric) Update() error {
 	if m == nil || m.monitor == nil {
 		return fmt.Errorf("monitor is nil")
 	}
-
-	metricLabels := m.Labels()
-
-	// Guard against nil status fields
 	if m.monitor.Status.ExpiresAt == nil {
 		return fmt.Errorf("status field ExpiresAt is nil")
 	}
 	if m.monitor.Status.SecondsRemaining == nil {
 		return fmt.Errorf("status field SecondsRemaining is nil")
 	}
+	if m.monitor.Status.State == "" {
+		return fmt.Errorf("status field State is empty")
+	}
 
-	validUntilGauge, err := SecretValidUntilTimestamp.GetMetricWith(metricLabels)
+	// Clear first, so a changed state, service or secretRef cannot leave a
+	// stale series behind at its last written value.
+	m.reset()
+
+	labels := m.Labels()
+
+	validUntilGauge, err := SecretValidUntilTimestamp.GetMetricWith(labels)
 	if err != nil {
 		return err
 	}
 	validUntilGauge.Set(float64(m.monitor.Status.ExpiresAt.Unix()))
 
-	secondsUntilGauge, err := SecretSecondsUntilExpiry.GetMetricWith(metricLabels)
+	secondsUntilGauge, err := SecretSecondsUntilExpiry.GetMetricWith(labels)
 	if err != nil {
 		return err
 	}
 	secondsUntilGauge.Set(float64(*m.monitor.Status.SecondsRemaining))
+
+	stateGauge, err := MonitorStateGauge.GetMetricWith(m.StateLabels())
+	if err != nil {
+		return err
+	}
+	stateGauge.Set(1)
+
+	return nil
+}
+
+// SetError drops the value gauges, whose expiry is genuinely unknown while
+// the Monitor is failing, and publishes the state series so that the failure
+// itself stays alertable. Deleting everything would make the most
+// alert-worthy condition the one that goes silent.
+func (m *Metric) SetError() error {
+	if m == nil || m.monitor == nil {
+		return fmt.Errorf("monitor is nil")
+	}
+
+	m.reset()
+
+	labels := m.StateLabels()
+	if labels[LabelState] == "" {
+		labels[LabelState] = string(expiringsecretv1alpha1.MonitorStateError)
+	}
+
+	stateGauge, err := MonitorStateGauge.GetMetricWith(labels)
+	if err != nil {
+		return err
+	}
+	stateGauge.Set(1)
+
+	m.logger.Info("Published error state metric", "labels", labels)
 	return nil
 }
 
@@ -179,22 +269,7 @@ func (m *Metric) Cleanup() {
 	if m == nil || m.monitor == nil {
 		return
 	}
-
-	metricLabels := m.Labels()
-
-	successSecretValidUntilTimestamp := SecretValidUntilTimestamp.Delete(metricLabels)
-	if successSecretValidUntilTimestamp {
-		m.logger.Info("Deleted metrics for Monitor, ValidUntilTimestamp", "labels", metricLabels)
-	} else {
-		noSecretValidUntilTimestamp := SecretValidUntilTimestamp.DeletePartialMatch(metricLabels)
-		m.logger.Info("(Partial Match) Deleted metrics for Monitor, ValidUntilTimestamp", "noOfMetricsDeleted", noSecretValidUntilTimestamp, "labels", metricLabels)
-	}
-
-	successSecretSecondsUntilExpiry := SecretSecondsUntilExpiry.Delete(metricLabels)
-	if successSecretSecondsUntilExpiry {
-		m.logger.Info("Deleted metrics for Monitor, SecondsUntilExpiry", "labels", metricLabels)
-	} else {
-		noSecretSecondsUntilExpiry := SecretSecondsUntilExpiry.DeletePartialMatch(metricLabels)
-		m.logger.Info("(Partial Match) Deleted metrics for Monitor, SecondsUntilExpiry", "noOfMetricsDeleted", noSecretSecondsUntilExpiry, "labels", metricLabels)
-	}
+	deleted := m.reset()
+	m.logger.Info("Deleted metrics for Monitor",
+		"seriesDeleted", deleted, "labels", m.identityLabels())
 }

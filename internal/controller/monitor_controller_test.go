@@ -25,6 +25,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,6 +77,15 @@ func (e *errorClient) Get(ctx context.Context, key client.ObjectKey, obj client.
 	return e.Client.Get(ctx, key, obj, opts...)
 }
 
+const (
+	MonitorNamespace        = "default"
+	Service                 = "docker.io"
+	TokenKey                = "token"
+	MonitorKind             = "Monitor"
+	TargetSecretName        = "target-secret"
+	ErrorMetricsMonitorName = "error-metrics-monitor"
+)
+
 var _ = Describe("Monitor Controller", func() {
 	newReconciler := func() *MonitorReconciler {
 		return &MonitorReconciler{
@@ -110,11 +120,9 @@ var _ = Describe("Monitor Controller", func() {
 
 	Context("When reconciling a Monitor resource", func() {
 		const (
-			MonitorName      = "test-monitor"
-			MonitorNamespace = "default"
-			SecretName       = "test-secret"
-			SecretNamespace  = "default"
-			Service          = "docker.io"
+			MonitorName     = "test-monitor"
+			SecretName      = "test-secret"
+			SecretNamespace = "default"
 
 			timeout         = time.Second * 10
 			interval        = time.Millisecond * 250
@@ -391,11 +399,9 @@ var _ = Describe("Monitor Controller", func() {
 
 	Context("Can handle invalid values", func() {
 		const (
-			MonitorName      = "test-monitor"
-			MonitorNamespace = "default"
-			SecretName       = "test-secret"
-			SecretNamespace  = "default"
-			Service          = "docker.io"
+			MonitorName     = "test-monitor"
+			SecretName      = "test-secret"
+			SecretNamespace = "default"
 
 			timeout         = time.Second * 10
 			interval        = time.Millisecond * 250
@@ -539,11 +545,9 @@ var _ = Describe("Monitor Controller", func() {
 
 	Context("When verifying metrics cleanup", func() {
 		const (
-			MonitorName      = "test-monitor"
-			MonitorNamespace = "default"
-			SecretName       = "test-secret"
-			SecretNamespace  = "default"
-			Service          = "docker.io"
+			MonitorName     = "test-monitor"
+			SecretName      = "test-secret"
+			SecretNamespace = "default"
 
 			timeout         = time.Second * 10
 			interval        = time.Millisecond * 250
@@ -1005,14 +1009,14 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-monitor",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
 						Name:      "test-secret",
-						Namespace: "default",
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 				Status: expiringsecretv1alpha1.MonitorStatus{
 					State:     expiringsecretv1alpha1.MonitorStateWarning,
@@ -1029,10 +1033,10 @@ var _ = Describe("Monitor Controller", func() {
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "no-label-secret",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 				},
 				Data: map[string][]byte{
-					"token": []byte("fake-token"),
+					TokenKey: []byte("fake-token"),
 				},
 			}
 
@@ -1045,13 +1049,13 @@ var _ = Describe("Monitor Controller", func() {
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-date-secret",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 					Labels: map[string]string{
 						"validUntil": "not-a-date",
 					},
 				},
 				Data: map[string][]byte{
-					"token": []byte("fake-token"),
+					TokenKey: []byte("fake-token"),
 				},
 			}
 
@@ -1079,18 +1083,18 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "requeue-monitor",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "target-secret",
-						Namespace: "default",
+						Name:      TargetSecretName,
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 			}
 
@@ -1117,7 +1121,7 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "delete-monitor",
@@ -1126,10 +1130,10 @@ var _ = Describe("Monitor Controller", func() {
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "target-secret",
-						Namespace: "default",
+						Name:      TargetSecretName,
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 			}
 
@@ -1151,7 +1155,7 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "delete-monitor-error",
@@ -1160,10 +1164,10 @@ var _ = Describe("Monitor Controller", func() {
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "target-secret",
-						Namespace: "default",
+						Name:      TargetSecretName,
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 			}
 			controllerutil.AddFinalizer(monitor, monitorFinalizer)
@@ -1190,16 +1194,16 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "source-error-monitor",
-					Namespace: "default",
+					Namespace: MonitorNamespace,
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
 						Name:      "missing-secret",
-						Namespace: "default",
+						Namespace: MonitorNamespace,
 					},
 				},
 			}
@@ -1244,25 +1248,25 @@ var _ = Describe("Monitor Controller", func() {
 				Scheme: scheme,
 			}
 
-			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "secret", Namespace: "default"}}
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "secret", Namespace: MonitorNamespace}}
 			requests := reconciler.mapSecretToMonitor(ctx, secret)
 			Expect(requests).To(BeNil())
 		})
 
 		It("should default secret namespace when secretRef namespace is empty", func() {
-			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "mapped-secret", Namespace: "default"}}
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "mapped-secret", Namespace: MonitorNamespace}}
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
-				ObjectMeta: metav1.ObjectMeta{Name: "mapped-monitor", Namespace: "default"},
+				ObjectMeta: metav1.ObjectMeta{Name: "mapped-monitor", Namespace: MonitorNamespace},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
 						Name:      secret.Name,
 						Namespace: "",
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 			}
 
@@ -1281,15 +1285,15 @@ var _ = Describe("Monitor Controller", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       "Monitor",
+					Kind:       MonitorKind,
 				},
-				ObjectMeta: metav1.ObjectMeta{Name: "metric-error", Namespace: "default"},
+				ObjectMeta: metav1.ObjectMeta{Name: "metric-error", Namespace: MonitorNamespace},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "target-secret",
-						Namespace: "default",
+						Name:      TargetSecretName,
+						Namespace: MonitorNamespace,
 					},
-					Service: "docker.io",
+					Service: Service,
 				},
 				Status: expiringsecretv1alpha1.MonitorStatus{
 					State:            expiringsecretv1alpha1.MonitorStateValid,
@@ -1339,18 +1343,115 @@ var _ = Describe("Monitor Controller", func() {
 		})
 
 		It("should evaluate secret update predicate", func() {
-			oldSecret := &corev1.Secret{Data: map[string][]byte{"token": []byte("a")}}
-			newSecret := &corev1.Secret{Data: map[string][]byte{"token": []byte("a")}}
+			oldSecret := &corev1.Secret{Data: map[string][]byte{TokenKey: []byte("a")}}
+			newSecret := &corev1.Secret{Data: map[string][]byte{TokenKey: []byte("a")}}
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: newSecret})).To(BeFalse())
 
 			newSecret.Data["token"] = []byte("b")
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: newSecret})).To(BeTrue())
 
-			newSecret.Data = map[string][]byte{"token": []byte("a"), "extra": []byte("c")}
+			newSecret.Data = map[string][]byte{TokenKey: []byte("a"), "extra": []byte("c")}
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: newSecret})).To(BeTrue())
 
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: &expiringsecretv1alpha1.Monitor{}, ObjectNew: newSecret})).To(BeFalse())
 			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: &expiringsecretv1alpha1.Monitor{}})).To(BeFalse())
+		})
+	})
+
+	Context("Prometheus metrics", func() {
+		BeforeEach(func() {
+			utils.SecretValidUntilTimestamp.Reset()
+			utils.SecretSecondsUntilExpiry.Reset()
+			utils.MonitorStateGauge.Reset()
+		})
+
+		AfterEach(func() {
+			// Guarantee the reset runs even if a spec fails partway through
+			// and its own trailing cleanup code never executes, so orphaned
+			// series never leak into later specs sharing these package-level
+			// gauges.
+			utils.SecretValidUntilTimestamp.Reset()
+			utils.SecretSecondsUntilExpiry.Reset()
+			utils.MonitorStateGauge.Reset()
+		})
+
+		It("publishes all three series for a healthy Monitor", func() {
+			ctx := context.Background()
+			secret := testutils.GenerateValidDaysSecret(
+				types.NamespacedName{Name: "metrics-secret", Namespace: MonitorNamespace},
+				60,
+			)
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			monitor := testutils.GenerateMonitorService(
+				types.NamespacedName{Name: "metrics-monitor", Namespace: MonitorNamespace},
+				types.NamespacedName{Name: "metrics-secret", Namespace: MonitorNamespace},
+				Service,
+			)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+
+			reconciler := newReconciler()
+			name := types.NamespacedName{Name: "metrics-monitor", Namespace: MonitorNamespace}
+			// First pass adds the finalizer and defaults; the second
+			// populates status, which is what the metrics are built from.
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(testutil.CollectAndCount(utils.SecretValidUntilTimestamp)).To(Equal(1))
+			Expect(testutil.CollectAndCount(utils.SecretSecondsUntilExpiry)).To(Equal(1))
+			Expect(testutil.CollectAndCount(utils.MonitorStateGauge)).To(Equal(1))
+
+			By("removing every series once the Monitor is deleted")
+			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(testutil.CollectAndCount(utils.SecretValidUntilTimestamp)).To(Equal(0))
+			Expect(testutil.CollectAndCount(utils.SecretSecondsUntilExpiry)).To(Equal(0))
+			Expect(testutil.CollectAndCount(utils.MonitorStateGauge)).To(Equal(0))
+
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+
+		It("keeps a broken Monitor alertable via the state series", func() {
+			ctx := context.Background()
+			// No Secret is created, so the source lookup fails.
+			monitor := testutils.GenerateMonitorService(
+				types.NamespacedName{Name: ErrorMetricsMonitorName, Namespace: MonitorNamespace},
+				types.NamespacedName{Name: "absent-secret", Namespace: MonitorNamespace},
+				Service,
+			)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+
+			reconciler := newReconciler()
+			name := types.NamespacedName{Name: ErrorMetricsMonitorName, Namespace: MonitorNamespace}
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("dropping the value gauges, whose expiry is unknown")
+			Expect(testutil.CollectAndCount(utils.SecretValidUntilTimestamp)).To(Equal(0))
+			Expect(testutil.CollectAndCount(utils.SecretSecondsUntilExpiry)).To(Equal(0))
+
+			By("publishing the Error state so an alert can fire")
+			Expect(testutil.CollectAndCount(utils.MonitorStateGauge)).To(Equal(1))
+			metric, err := utils.MonitorStateGauge.GetMetricWith(prometheus.Labels{
+				utils.LabelMonitorName:      ErrorMetricsMonitorName,
+				utils.LabelMonitorNamespace: MonitorNamespace,
+				utils.LabelSecretName:       "absent-secret",
+				utils.LabelSecretNamespace:  MonitorNamespace,
+				utils.LabelSecretService:    Service,
+				utils.LabelState:            string(expiringsecretv1alpha1.MonitorStateError),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(testutil.ToFloat64(metric)).To(Equal(1.0))
+
+			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })

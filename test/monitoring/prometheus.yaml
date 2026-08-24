@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: dev
+  namespace: monitoring
+spec:
+  serviceAccountName: prometheus
+  # Empty selectors mean "everything", across every namespace: this is a
+  # throwaway dev instance, not a tuned production one.
+  serviceMonitorNamespaceSelector: {}
+  serviceMonitorSelector: {}
+  ruleNamespaceSelector: {}
+  ruleSelector:
+    matchLabels:
+      role: alert-rules
+  scrapeInterval: 30s
+  resources:
+    requests:
+      memory: 400Mi
+  enableAdminAPI: false

@@ -1,0 +1,12 @@
+# Teaches kustomize to rewrite the Secret name inside the ServiceMonitor's
+# authorization block when namePrefix is applied. Declared here, in the
+# kustomization that applies namePrefix, because that is where the
+# transformer runs.
+nameReference:
+- kind: Secret
+  version: v1
+  fieldSpecs:
+  - kind: ServiceMonitor
+    group: monitoring.coreos.com
+    version: v1
+    path: spec/endpoints/authorization/credentials/name

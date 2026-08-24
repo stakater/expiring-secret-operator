@@ -1,0 +1,39 @@
+# Prometheus Monitor Service (Metrics)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: expiring-secrets
+    app.kubernetes.io/managed-by: kustomize
+  name: controller-manager-metrics-monitor
+  namespace: system
+spec:
+  endpoints:
+    - path: /metrics
+      # Named port from config/default/metrics_service.yaml, so this cannot
+      # drift from the Service definition.
+      port: https
+      scheme: https
+      # The metrics endpoint is protected by the manager's authn/authz filter
+      # (see cmd/main.go), so the scrape must present a bearer token.
+      #
+      # Do NOT switch this to bearerTokenFile. OpenShift user-workload
+      # monitoring sets arbitraryFSAccessThroughSMs to deny, which rejects
+      # any ServiceMonitor reading a path from the Prometheus container's
+      # filesystem. Prometheus Operator also deprecates that field.
+      authorization:
+        type: Bearer
+        credentials:
+          name: metrics-reader-token
+          key: token
+      tlsConfig:
+        # TODO(user): the manager serves a self-signed certificate, so there
+        # is no CA to verify against yet. Replacing this means issuing
+        # serving certs with cert-manager and referencing the CA here as
+        # tlsConfig.ca.secret — note that caFile is unavailable for the same
+        # arbitraryFSAccessThroughSMs reason described above.
+        insecureSkipVerify: true
+  selector:
+    matchLabels:
+      control-plane: controller-manager

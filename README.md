@@ -71,14 +71,25 @@ The operator exposes these metrics on `/metrics`:
 
 ```prometheus
 # Absolute expiration timestamp (Unix time)
-secretmonitor_valid_until_timestamp{registry="docker.io",name="docker-registry-monitor",namespace="default"} 1760486400
+expiringsecrets_monitor_valid_until_timestamp_seconds{monitor_name="docker-registry-monitor",monitor_namespace="default",secret_name="docker-registry-token",secret_namespace="default",secret_service="docker.io"} 1760486400
 
-# Human-friendly seconds until expiry
-secretmonitor_seconds_until_expiry{registry="docker.io",name="docker-registry-monitor",namespace="default"} 1209600
+# Seconds until expiry, negative once expired
+expiringsecrets_monitor_until_expiration_seconds{monitor_name="docker-registry-monitor",monitor_namespace="default",secret_name="docker-registry-token",secret_namespace="default",secret_service="docker.io"} 1209600
 
-# Reconciliation success/failure counter
-secretmonitor_reconcile_total{monitor="docker-registry-monitor",namespace="default",result="success"} 5
+# Current state, always 1, emitted only for the state the Monitor is in
+expiringsecrets_monitor_state{monitor_name="docker-registry-monitor",monitor_namespace="default",secret_name="docker-registry-token",secret_namespace="default",secret_service="docker.io",state="Info"} 1
 ```
+
+The `state` label appears on `expiringsecrets_monitor_state` only, never on
+the two value gauges. Keeping it off them is deliberate: a label whose value
+changes over the object's lifetime orphans the series recorded under the
+previous value.
+
+Alerts fire from `expiringsecrets_monitor_state` rather than by comparing
+`expiringsecrets_monitor_until_expiration_seconds` against a duration in
+PromQL. Thresholds are per-Monitor (`spec.alertThresholds`), so only the
+operator knows which one applies to a given Monitor; a threshold written
+into a PromQL expression would silently ignore the CRD.
 
 ## Alert States
 
@@ -93,6 +104,8 @@ secretmonitor_reconcile_total{monitor="docker-registry-monitor",namespace="defau
 
 ## PrometheusRule Example
 
+The operator ships `PrometheusRule` with alerting rules based on `expiringsecrets_monitor_state`. The following example is illustrative of writing your own:
+
 ```yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -103,20 +116,20 @@ spec:
   - name: expiring-secrets
     rules:
     - alert: SecretExpiringSoon
-      expr: secretmonitor_seconds_until_expiry < 14 * 24 * 60 * 60  # 14 days
-      for: 1h
+      expr: expiringsecrets_monitor_state{state="Warning"} == 1
+      for: 5m
       labels:
         severity: warning
       annotations:
-        summary: "Secret {{ $labels.name }} expires in {{ $value | humanizeDuration }}"
-    
-    - alert: SecretExpiredCritical  
-      expr: secretmonitor_seconds_until_expiry < 7 * 24 * 60 * 60   # 7 days
-      for: 30m
+        summary: "Secret {{ $labels.secret_name }} has passed its warning threshold"
+
+    - alert: SecretExpiredCritical
+      expr: expiringsecrets_monitor_state{state="Critical"} == 1
+      for: 5m
       labels:
         severity: critical
       annotations:
-        summary: "Secret {{ $labels.name }} expires VERY SOON: {{ $value | humanizeDuration }}"
+        summary: "Secret {{ $labels.secret_name }} has passed its critical threshold"
 ```
 
 ## Use Cases

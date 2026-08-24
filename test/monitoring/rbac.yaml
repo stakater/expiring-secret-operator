@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dev-prometheus
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/metrics
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources:
+  # Only configmaps: Prometheus Operator (not the Prometheus pod) resolves
+  # authorization.credentials secretRefs at config-generation time and
+  # mounts the value into the pod, so the Prometheus process itself never
+  # calls the Secrets API. Do NOT add "secrets" here: cluster-wide
+  # secrets:get would let anyone with code execution or SSRF in this pod
+  # read every Secret in the cluster for a capability it doesn't use.
+  - configmaps
+  verbs: ["get"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dev-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dev-prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: monitoring
