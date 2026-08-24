@@ -1,0 +1,55 @@
+# Run via `make test-rules`, which extracts .spec from the PrometheusRule
+# into rules.generated.yaml alongside this file.
+rule_files:
+  - rules.generated.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'expiringsecrets_monitor_state{monitor_name="m1",monitor_namespace="ns1",secret_name="s1",secret_namespace="ns1",secret_service="quay.io",state="Critical"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SecretExpirationDateIsCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              monitor_name: m1
+              monitor_namespace: ns1
+              secret_name: s1
+              secret_namespace: ns1
+              secret_service: quay.io
+              state: Critical
+            exp_annotations:
+              summary: "Secret expiration date is critical"
+              description: "The secret 's1' in namespace 'ns1' has passed its critical threshold."
+      # A Critical Monitor must not also fire the warning-level alert.
+      - eval_time: 10m
+        alertname: SecretExpirationDateIsApproachingRapidly
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'expiringsecrets_monitor_state{monitor_name="m2",monitor_namespace="ns2",secret_name="s2",secret_namespace="ns2",secret_service="ghcr.io",state="Error"}'
+        values: '1+0x30'
+    alert_rule_test:
+      # Below the 15m `for`, nothing fires yet.
+      - eval_time: 10m
+        alertname: SecretMonitorError
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: SecretMonitorError
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              monitor_name: m2
+              monitor_namespace: ns2
+              secret_name: s2
+              secret_namespace: ns2
+              secret_service: ghcr.io
+              state: Error
+            exp_annotations:
+              summary: "Secret monitor cannot evaluate expiry"
+              description: "The Monitor 'm2' in namespace 'ns2' cannot evaluate secret 's2'. Expiry is unknown."

@@ -2,45 +2,56 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: expired-secret-rules
-  namespace: openshift-monitoring
   labels:
     prometheus: k8s
     role: alert-rules
+    app.kubernetes.io/name: expiring-secrets
+    app.kubernetes.io/managed-by: kustomize
 spec:
   groups:
     - name: expired-secret.rules
       rules:
+        # These alert on the state the operator computed, not on a duration
+        # threshold repeated in PromQL. Thresholds are per-Monitor
+        # (spec.alertThresholds), so only the operator knows which one
+        # applies; hardcoding them here silently ignored the CRD.
         - alert: SecretExpirationDateIsApproaching
-          expr: |
-            expiringsecret_monitor_until_expiration_seconds < 30*24*60*60
-            and expiringsecret_monitor_until_expiration_seconds >= 14*24*60*60
+          expr: expiringsecrets_monitor_state{state="Info"} == 1
           for: 10m
           labels:
             severity: info
           annotations:
             summary: "Secret expiration date is approaching"
-            description: |
-              The secret named '{{ $labels.secret_name }}' in '{{ $labels.secret_namespace }}' has an expiration date within the next 30 days.
+            description: "The secret '{{ $labels.secret_name }}' in namespace '{{ $labels.secret_namespace }}' has passed its info threshold."
         - alert: SecretExpirationDateIsApproachingRapidly
-          expr: |
-            expiringsecret_monitor_until_expiration_seconds < 14*24*60*60
-            and expiringsecret_monitor_until_expiration_seconds >= 7*24*60*60
+          expr: expiringsecrets_monitor_state{state="Warning"} == 1
           for: 5m
           labels:
             severity: warning
           annotations:
             summary: "Secret expiration date is approaching rapidly"
-            description: |
-              The secret named '{{ $labels.secret_name }}' in '{{ $labels.secret_namespace }}' has an expiration date within the next 14 days.
+            description: "The secret '{{ $labels.secret_name }}' in namespace '{{ $labels.secret_namespace }}' has passed its warning threshold."
         - alert: SecretExpirationDateIsCritical
-          expr: |
-            expiringsecret_monitor_until_expiration_seconds < 7*24*60*60
+          expr: expiringsecrets_monitor_state{state="Critical"} == 1
           for: 5m
           labels:
             severity: critical
           annotations:
             summary: "Secret expiration date is critical"
-            description: |
-              The secret named '{{ $labels.secret_name }}' in '{{ $labels.secret_namespace }}' has an expiration date within the next 7 days.
-
-
+            description: "The secret '{{ $labels.secret_name }}' in namespace '{{ $labels.secret_namespace }}' has passed its critical threshold."
+        - alert: SecretHasExpired
+          expr: expiringsecrets_monitor_state{state="Expired"} == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Secret has expired"
+            description: "The secret '{{ $labels.secret_name }}' in namespace '{{ $labels.secret_namespace }}' has expired."
+        - alert: SecretMonitorError
+          expr: expiringsecrets_monitor_state{state="Error"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Secret monitor cannot evaluate expiry"
+            description: "The Monitor '{{ $labels.monitor_name }}' in namespace '{{ $labels.monitor_namespace }}' cannot evaluate secret '{{ $labels.secret_name }}'. Expiry is unknown."

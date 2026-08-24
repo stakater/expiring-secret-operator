@@ -1,0 +1,18 @@
+# A long-lived token for Prometheus to authenticate against /metrics.
+# Its only grant is `get` on the non-resource URL /metrics, so the blast
+# radius of a leak is read access to secret-expiry metrics.
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    app.kubernetes.io/name: expiring-secrets
+    app.kubernetes.io/managed-by: kustomize
+  name: metrics-reader-token
+  namespace: system
+  annotations:
+    # NOTE: this value must carry the namePrefix from
+    # config/default/kustomization.yaml. kustomize rewrites resource names
+    # but never the contents of an annotation, so this one string has to
+    # track that prefix by hand.
+    kubernetes.io/service-account.name: expiring-secret-operator-metrics-reader
+type: kubernetes.io/service-account-token
