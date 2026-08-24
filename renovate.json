@@ -1,6 +1,96 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "local>stakater-ab/.github:renovate-config",
+    "config:best-practices",
+    ":semanticCommits"
+  ],
+  "rangeStrategy": "replace",
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "📦 Dependency Updates Dashboard",
+  "configMigration": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"]
+  },
+  "labels": [
+    "dependencies",
+    "renovate",
+    "automated"
+  ],
+  "dockerfile": {
+    "fileMatch": ["(^|/)[^/]*Dockerfile[^/]*$"]
+  },
+  "postUpdateOptions": ["gomodTidy"],
+  "rebaseWhen": "behind-base-branch",
+  "packageRules": [
+    {
+      "description": "Bundle all patch and minor updates into a single PR to save pipeline execution minutes",
+      "matchUpdateTypes": ["patch", "minor"],
+      "matchManagers": ["gomod"],
+      "groupName": "Go Dependency Updates",
+      "groupSlug": "go-deps-bundle"
+    },
+    {
+      "description": "Auto-merge patches immediately if CI/CD validations pass",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Hold minor versions for 14 days before making them eligible for the bundle and auto-merge",
+      "matchUpdateTypes": ["minor"],
+      "minimumReleaseAge": "14 days",
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Isolate major versions and require manual approval before merging",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Stakater internal dependencies - bundle separately and auto-merge immediately without stability cooldowns",
+      "groupName": "Docker base images",
+      "groupSlug": "docker-base-images",
+      "matchMatchers": ["dockerfile"]
+    },
+    {
+      "description": "Kubernetes dependencies - bundle separately and require manual approval before merging",
+      "groupName": "Kubernetes Dependencies",
+      "groupSlug": "k8s-deps",
+      "dependencyDashboardApproval": true,
+      "matchPackagePrefixes": [
+        "k8s.io/",
+        "sigs.k8s.io/"
+      ]
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "**/[Mm]akefile",
+        "**/GNUMakefile",
+        "**/*.mk"
+      ],
+      "matchStrings": [
+        "^#\\s+renovate:\\s+datasource=(?<datasource>[^\\s]+?) depName=(?<depName>[^\\s]+?)(?:\\s+(?:packageName)=(?<packageName>[^\\s]+?))?(?:\\s+versioning=(?<versioning>[^\\s]+?))?(?:\\s+extractVersion=[\"']?(?<extractVersion>.+?)[\"']?)?(?:\\s+registryUrl=(?<registryUrl>[^\\s]+?))?\\s[A-Za-z0-9_]+?_VERSION\\s*:*\\??=\\s*[\"']?(?<currentValue>.+?)[\"']?\\s"
+      ]
+    },
+    {
+      "description": "Stakater internal dependencies - bundle separately and auto-merge immediately without stability cooldowns",
+      "groupName": "Stakater Updates",
+      "groupSlug": "stakater",
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true,
+      "minimumReleaseAge": null,
+      "matchSourceUrls": [
+        "https://github.com/stakater/{/,}**",
+        "https://github.com/stakater-ab/{/,}**"
+      ]
+    }
   ]
 }
