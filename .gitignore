@@ -33,3 +33,4 @@ test/rules/rules.generated.yaml
 # e2e scrape dump, written to repo root and to test/e2e/
 metrics_output.txt
 test/e2e/metrics_output.txt
+.devcontainer
