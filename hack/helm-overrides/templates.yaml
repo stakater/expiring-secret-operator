@@ -9,9 +9,73 @@
 #
 # Note: Use \n for newlines in multi-line replacements
 
-#deployment.yaml:
-#  - search: "name: cloud-orchestrator-gateway-controller-manager"
-#    replace: "name: {{ include \"cloud-orchestrator-gateway.fullname\" . }}-controller-manager"
-#  - search: "\\s*app\\.kubernetes\\.io/name: cloud-orchestrator-gateway"
-#    replace: ''
-#    regex: true
+controller-manager-metrics-monitor.yaml:
+  #- search: "name: expiring-secret-operator-controller-manager-metrics-monitor"
+  #  replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}-controller-manager-metrics-monitor"
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+deployment.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+  - search: "\\n(\\s+)name: manager\\n(\\s+)readinessProbe:"
+    replace: |-
+
+      $1name: manager
+      $1ports:
+      $1- containerPort: 8443
+      $1  name: https
+      $1  protocol: TCP
+      $2readinessProbe:
+    regex: true
+
+expired-secret-rules.yaml:
+  #- search: "name: expiring-secret-operator-expired-secret-rules"
+  #  replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}-expired-secret-rules"
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+leader-election-rbac.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+manager-rbac.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+metrics-auth-rbac.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+metrics-reader-rbac.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+metrics-reader-token.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+metrics-service.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+monitor-admin-rbac.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+monitor-editor-rbac.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+monitor-viewer-rbac.yaml:
+  - search: "name: expiring-secret-operator"
+    replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+serviceaccount.yaml:
+  #- search: "name: expiring-secret-operator"
+  #  replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
+
+  - search: "---\n{{ if .Values.serviceAccount.create }}\napiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: {{ include \"expiring-secret-operator.serviceAccountName\" . }}"
+    replace: "---\n{{ if .Values.serviceAccount.create }}\napiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: {{ include \"expiring-secret-operator.serviceAccountName\" . }}-metrics-reader"
+  #  regex: true

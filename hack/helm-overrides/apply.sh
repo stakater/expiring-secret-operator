@@ -20,7 +20,7 @@ set -euo pipefail
 : ${PWD:="$(cd -P -- "." && pwd -P)"}
 # Absolute physical script dir
 : ${SCRIPT_DIR:="$(cd -P -- "${BASH_SOURCE[0]%/*}" && pwd -P)"}
-: ${CHART_DIR:="charts/cloud-orchestrator-gateway"}
+: ${CHART_DIR:="charts/expiring-secret-operator"}
 : ${OVERRIDE_FILE:=${1:-$SCRIPT_DIR/templates.yaml}}
 : ${VALUES_OVERRIDE_FILE:=${2:-$SCRIPT_DIR/values.yaml}}
 : ${EXTRA_TEMPLATES_DIR:=${3:-$SCRIPT_DIR/helm-templates}}

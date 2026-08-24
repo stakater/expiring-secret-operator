@@ -1,27 +1,2 @@
 # Values to merge into generated values.yaml
 
-rbac:
-  # Cluster-scoped RBAC (metrics auth ClusterRole/Binding, the projcfg
-  # admin/editor/viewer helper ClusterRoles, and the metrics-reader
-  # ClusterRole). These carry fixed, un-prefixed names, so installing more
-  # than one instance of this chart in a cluster (e.g. one per tenant
-  # namespace) with clusterWide.enabled=true on every install will collide
-  # on the same ClusterRole/ClusterRoleBinding names. Leave enabled=true on
-  # exactly one install per cluster and set it to false on the rest. The
-  # manager's own permissions (ProjectConfiguration/OpenAPIOverlay/
-  # EnumContext) are unaffected - those are always a namespaced Role, scoped
-  # to .Release.Namespace, and are safe to install per-instance.
-  clusterWide:
-    enabled: true
-
-gateway:
-  annotations: {}
-
-ingress:
-  className: nginx
-  host: gateway.local
-  annotations:
-    stakater.com/description: Ingress for the SCO-Gateway
-  tls:
-    enabled: true
-    secretName: gateway-tls
