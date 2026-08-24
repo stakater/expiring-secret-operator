@@ -164,5 +164,5 @@ entries:
 
 ## More Information
 Refer to the OpenShift documentation for managing custom catalogs:
-[OLM Managing Custom Catalogs](https://docs.openshift.com/container-platform/latest/operators/admin/olm-managing-custom-catalogs.html)
+[OLM Managing Custom Catalogs](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/operators/administrator-tasks)
 
