@@ -19,7 +19,7 @@
     "automated"
   ],
   "dockerfile": {
-    "fileMatch": ["(^|/)[^/]*Dockerfile[^/]*$"]
+    "managerFilePatterns": ["/(^|/)[^/]*Dockerfile[^/]*$/"]
   },
   "postUpdateOptions": ["gomodTidy"],
   "rebaseWhen": "behind-base-branch",
@@ -53,30 +53,19 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Stakater internal dependencies - bundle separately and auto-merge immediately without stability cooldowns",
+      "description": "Docker base images - bundle separately",
       "groupName": "Docker base images",
       "groupSlug": "docker-base-images",
-      "matchMatchers": ["dockerfile"]
+      "matchManagers": ["dockerfile"]
     },
     {
       "description": "Kubernetes dependencies - bundle separately and require manual approval before merging",
       "groupName": "Kubernetes Dependencies",
       "groupSlug": "k8s-deps",
       "dependencyDashboardApproval": true,
-      "matchPackagePrefixes": [
-        "k8s.io/",
-        "sigs.k8s.io/"
-      ]
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": [
-        "**/[Mm]akefile",
-        "**/GNUMakefile",
-        "**/*.mk"
-      ],
-      "matchStrings": [
-        "^#\\s+renovate:\\s+datasource=(?<datasource>[^\\s]+?) depName=(?<depName>[^\\s]+?)(?:\\s+(?:packageName)=(?<packageName>[^\\s]+?))?(?:\\s+versioning=(?<versioning>[^\\s]+?))?(?:\\s+extractVersion=[\"']?(?<extractVersion>.+?)[\"']?)?(?:\\s+registryUrl=(?<registryUrl>[^\\s]+?))?\\s[A-Za-z0-9_]+?_VERSION\\s*:*\\??=\\s*[\"']?(?<currentValue>.+?)[\"']?\\s"
+      "matchPackageNames": [
+        "k8s.io/{/,}**",
+        "sigs.k8s.io/{/,}**"
       ]
     },
     {
@@ -90,6 +79,20 @@
       "matchSourceUrls": [
         "https://github.com/stakater/{/,}**",
         "https://github.com/stakater-ab/{/,}**"
+      ]
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Update *_VERSION variables in Makefiles annotated with a renovate comment",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "**/[Mm]akefile",
+        "**/GNUMakefile",
+        "**/*.mk"
+      ],
+      "matchStrings": [
+        "^#\\s+renovate:\\s+datasource=(?<datasource>[^\\s]+?) depName=(?<depName>[^\\s]+?)(?:\\s+(?:packageName)=(?<packageName>[^\\s]+?))?(?:\\s+versioning=(?<versioning>[^\\s]+?))?(?:\\s+extractVersion=[\"']?(?<extractVersion>.+?)[\"']?)?(?:\\s+registryUrl=(?<registryUrl>[^\\s]+?))?\\s[A-Za-z0-9_]+?_VERSION\\s*:*\\??=\\s*[\"']?(?<currentValue>.+?)[\"']?\\s"
       ]
     }
   ]
