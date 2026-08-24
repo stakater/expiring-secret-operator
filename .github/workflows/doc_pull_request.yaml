@@ -13,7 +13,7 @@ on:
 
 jobs:
   doc_qa:
-    uses: stakater/.github/.github/workflows/pull_request_doc_qa.yaml@v0.0.148
+    uses: stakater/.github/.github/workflows/pull_request_doc_qa.yaml@v0.0.197
     with:
       MD_CONFIG: .github/md_config.json
       DOC_SRC: README.md
