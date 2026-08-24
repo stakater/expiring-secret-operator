@@ -34,3 +34,4 @@ test/rules/rules.generated.yaml
 metrics_output.txt
 test/e2e/metrics_output.txt
 .devcontainer
+charts
