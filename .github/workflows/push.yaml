@@ -15,7 +15,7 @@ jobs:
   push-operator:
     name: Push Operator
     if: "! contains(toJSON(github.event.commits.*.message), '[skip-ci]')"
-    uses: stakater/.github/.github/workflows/operator_push.yaml@ae4c65e9d10b541f301d4b8e24921319586d0980 # main
+    uses: stakater/.github/.github/workflows/operator_push.yaml@6b627e9d9ebace9ca6e038c118e51edcf2f059e8 # main
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.STAKATER_DELIVERY_SLACK_WEBHOOK }}
       CONTAINER_REGISTRY_URL: ghcr.io/stakater
