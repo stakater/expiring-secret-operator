@@ -36,6 +36,15 @@ expired-secret-rules.yaml:
   - search: "name: expiring-secret-operator"
     replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
 
+  # Prometheus alert annotations use Go-template `{{ $labels.* }}` refs that
+  # collide with Helm templating — Helm would try to resolve `$labels` at
+  # install time and fail. Escape them so Helm emits the literal braces and
+  # Prometheus (not Helm) interprets them at alert time. Matches across the
+  # YAML line-fold helmify introduces, hence \s* around the name.
+  - search: '\{\{\s*(\$labels\.[a-z_]+)\s*\}\}'
+    replace: '{{ "{{" }} ${1} {{ "}}" }}'
+    regex: true
+
 leader-election-rbac.yaml:
   - search: "name: expiring-secret-operator"
     replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"

@@ -877,7 +877,7 @@ endif
 endif
 
 .PHONY: common-yq
-YQ_VERSION := v4.13.0
+YQ_VERSION := v4.44.3
 YQ_BIN := $(LOCALBIN)/yq
 common-yq:
 ifeq (,$(wildcard $(YQ_BIN)))
