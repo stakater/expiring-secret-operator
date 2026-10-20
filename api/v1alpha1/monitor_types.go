@@ -83,7 +83,7 @@ type MonitorSpec struct {
 // Reference to a Secret to monitor.
 // It should contain a label with the expiration timestamp in "YYYY-MM-DD" format, e.g.:
 //
-//	expiringsecret.stakater.com/validUntil: "2025-12-31"
+//	expiring-secrets.stakater.com/validUntil: "2025-12-31"
 type SecretReference struct {
 	// Name is the name of the secret
 	// +kubebuilder:validation:Required
