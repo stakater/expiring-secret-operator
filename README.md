@@ -23,7 +23,7 @@ Container images and Helm charts are published to GHCR under
 The operator reconciles `PrometheusRule` and `ServiceMonitor` resources, so the
 **Prometheus Operator CRDs** must already be installed in the cluster.
 
-**Option A — Helm (recommended)**
+#### Option A — Helm (recommended)
 
 ```bash
 helm install expiring-secret-operator \
@@ -32,7 +32,7 @@ helm install expiring-secret-operator \
   --namespace expiring-secret-operator-system --create-namespace
 ```
 
-**Option B — kubectl + Kustomize**
+#### Option B — kubectl + Kustomize
 
 ```bash
 # Pin to a released tag (recommended) …
@@ -45,7 +45,7 @@ kubectl apply -k config/default
 Both deploy into the `expiring-secret-operator-system` namespace using the
 `ghcr.io/stakater/expiring-secret-operator` image.
 
-**Option C — local development (Kind)**
+#### Option C — local development (Kind)
 
 ```bash
 # Build and deploy to a local Kind cluster
