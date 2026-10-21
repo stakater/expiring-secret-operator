@@ -22,4 +22,4 @@ jobs:
       ENABLE_LINTING: true
       ENABLE_UNIT_TESTS: true
       #ENABLE_STAKATER_AB_GIT_AUTH: true
-      #ENABLE_CHART_PUSH: true
+      ENABLE_CHART_PUSH: true

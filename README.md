@@ -18,11 +18,40 @@ This operator watches Kubernetes Secrets containing expiring credentials and:
 
 ### 1. Deploy the Operator
 
+Container images and Helm charts are published to GHCR under
+[`ghcr.io/stakater`](https://github.com/orgs/stakater/packages?repo_name=expiring-secret-operator).
+The operator reconciles `PrometheusRule` and `ServiceMonitor` resources, so the
+**Prometheus Operator CRDs** must already be installed in the cluster.
+
+#### Option A — Helm (recommended)
+
 ```bash
-# Build and deploy to local Kind cluster
+helm install expiring-secret-operator \
+  oci://ghcr.io/stakater/charts/expiring-secret-operator \
+  --version 0.0.2 \
+  --namespace expiring-secret-operator-system --create-namespace
+```
+
+#### Option B — kubectl + Kustomize
+
+```bash
+# Pin to a released tag (recommended) …
+kubectl apply -k 'https://github.com/stakater/expiring-secret-operator/config/default?ref=v0.0.2'
+
+# … or from a local checkout
+kubectl apply -k config/default
+```
+
+Both deploy into the `expiring-secret-operator-system` namespace using the
+`ghcr.io/stakater/expiring-secret-operator` image.
+
+#### Option C — local development (Kind)
+
+```bash
+# Build and deploy to a local Kind cluster
 make deploy-core
 
-# Or build Docker image
+# Or just build the controller image
 make docker-build
 ```
 
