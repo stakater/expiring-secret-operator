@@ -28,7 +28,7 @@ The operator reconciles `PrometheusRule` and `ServiceMonitor` resources, so the
 ```bash
 helm install expiring-secret-operator \
   oci://ghcr.io/stakater/charts/expiring-secret-operator \
-  --version 0.0.2 \
+  --version 0.0.3 \
   --namespace expiring-secret-operator-system --create-namespace
 ```
 
