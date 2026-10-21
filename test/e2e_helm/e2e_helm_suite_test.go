@@ -130,7 +130,7 @@ var _ = AfterSuite(func() {
 	if out, err := utils.Run(exec.Command(helmBin, "uninstall", releaseName,
 		"--namespace", operatorNS, "--wait", "--timeout", "120s")); err != nil {
 		// Don't fail teardown; surface it for debugging.
-		fmt.Fprintf(GinkgoWriter, "helm uninstall warning: %v\n%s\n", err, string(out))
+		_, _ = fmt.Fprintf(GinkgoWriter, "helm uninstall warning: %v\n%s\n", err, string(out))
 	}
 
 	By("deleting the operator namespace")
