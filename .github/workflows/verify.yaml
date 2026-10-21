@@ -1,0 +1,22 @@
+name: Verify
+
+# Guards against the config/manager image tag drifting from VERSION. Without
+# this, `kubectl apply -k ...?ref=<tag>` can silently deploy a stale image
+# (issue #33). The shared pipeline doesn't check this, so it runs here.
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+      - release
+
+jobs:
+  verify-version:
+    name: Verify image tag matches VERSION
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check kustomize image tag == VERSION
+        run: make verify-version
