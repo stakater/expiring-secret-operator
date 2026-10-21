@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/stakater/expiring-secret-operator
-  newTag: v0.0.1
+  newTag: v0.0.4@sha256:f5850c4fc78c1c357704321aa57ea6d7d4e8b9efe88fd559aff3f42a9e87b2fa
