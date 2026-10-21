@@ -1,4 +1,4 @@
-VERSION ?= 0.0.1
+VERSION ?= 0.0.3
 OPERATOR_NAME ?= expiring-secret-operator
 #OPERATOR_NAME ?= expiring-secrets
 PROJECT_NAME ?= expiring-secrets.stakater.com
@@ -87,6 +87,27 @@ deploy-monitoring: kustomize ## Deploy a dev Prometheus into Kind to verify scra
 .PHONY: undeploy-monitoring
 undeploy-monitoring: kustomize ## Remove the dev Prometheus from Kind.
 	-$(KUSTOMIZE) build test/monitoring | $(KUBECTL) delete --ignore-not-found=true -f -
+
+.PHONY: set-version
+set-version: kustomize ## Bump the release version everywhere. Usage: make set-version VERSION=0.0.4 (then commit before tagging v0.0.4).
+	@test "$(VERSION)" != "" || { echo "VERSION is required, e.g. make set-version VERSION=0.0.4"; exit 1; }
+	@echo ">> setting version to $(VERSION)"
+	# Single source of truth: the Makefile VERSION. The kustomize image tag,
+	# used by `kubectl apply -k`, is derived from it so the two cannot drift.
+	sed -i.bak -E 's/^VERSION \?= .*/VERSION ?= $(VERSION)/' Makefile && rm -f Makefile.bak
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMAGE_TAG_BASE):v$(VERSION)
+	@echo ">> VERSION and config/manager/kustomization.yaml updated. Run 'make manifests bundle', commit, then tag v$(VERSION)."
+
+.PHONY: verify-version
+verify-version: ## Fail if the kustomize image tag does not match VERSION (guards against a stale `kubectl apply -k` image).
+	@tag=$$(awk '/newTag:/{print $$2}' config/manager/kustomization.yaml); \
+	want="v$(VERSION)"; \
+	if [ "$$tag" != "$$want" ]; then \
+	  echo "ERROR: config/manager/kustomization.yaml newTag=$$tag but VERSION=$(VERSION) (expected $$want)."; \
+	  echo "       Run 'make set-version VERSION=$(VERSION)' and commit."; \
+	  exit 1; \
+	fi; \
+	echo "OK: kustomize image tag ($$tag) matches VERSION ($(VERSION))."
 
 .PHONY: test-e2e-helm
 test-e2e-helm: ## Install the operator from its Helm chart into Kind and verify it reconciles (test/e2e_helm).
