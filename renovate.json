@@ -80,6 +80,11 @@
         "https://github.com/stakater/{/,}**",
         "https://github.com/stakater-ab/{/,}**"
       ]
+    },
+    {
+      "description": "Do not let Renovate manage the operator's OWN image. It is this repo's build output, not a dependency. The release process (make set-version) owns config/manager/kustomization.yaml's tag; otherwise Renovate pins it to the next-version dev build published on every master merge, so `kubectl apply -k` deploys an unreleased image and a release is never self-contained.",
+      "matchPackageNames": ["ghcr.io/stakater/expiring-secret-operator"],
+      "enabled": false
     }
   ],
   "customManagers": [
