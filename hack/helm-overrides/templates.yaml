@@ -61,6 +61,16 @@ metrics-reader-rbac.yaml:
   - search: "name: expiring-secret-operator"
     replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
 
+  # helmify binds the metrics-reader ClusterRole to the generic serviceAccount
+  # (the controller SA). The scrape credential is the separate metrics-reader
+  # SA/token, so as generated the reader is never authorized and /metrics
+  # returns "authorization denied" (empty metrics). Point the binding subject
+  # at the metrics-reader SA, matching serviceaccount.yaml and the token's
+  # kubernetes.io/service-account.name. The metrics-auth binding is left on the
+  # controller SA on purpose — that is the identity doing the TokenReview.
+  - search: "name: '{{ include \"expiring-secret-operator.serviceAccountName\" . }}'"
+    replace: "name: '{{ include \"expiring-secret-operator.serviceAccountName\" . }}-metrics-reader'"
+
 metrics-reader-token.yaml:
   - search: "name: expiring-secret-operator"
     replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"

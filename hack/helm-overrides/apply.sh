@@ -101,6 +101,16 @@ if [[ -f "${CHART_OVERRIDE_FILE}" ]]; then
   printf "  → %-64s ✓\n" "${CHART_FILE##*/}"
 fi
 
+# Track appVersion to the release version when the build provides one (the
+# release/helm make targets export VERSION). helmify leaves appVersion at a
+# placeholder, which otherwise surfaces as a wrong app.kubernetes.io/version
+# label on every rendered object.
+if [[ -n "${VERSION:-}" ]]; then
+  echo "Setting chart appVersion to ${VERSION}"
+  VERSION="${VERSION}" yq -i '.appVersion = strenv(VERSION)' "${CHART_FILE}"
+  printf "  → %-64s ✓\n" "${CHART_FILE##*/} (appVersion)"
+fi
+
 # Apply values overrides
 if [[ -f "${VALUES_OVERRIDE_FILE}" ]]; then
   echo "Merging values from ${VALUES_OVERRIDE_FILE#$PWD/} onto ${VALUES_FILE}"
