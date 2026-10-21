@@ -63,6 +63,9 @@ var _ = Describe("Operator installed via Helm chart", Ordered, func() {
 		_ = k8sClient.Delete(ctx, &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: testNamespace},
 		})
+		// Wait while the operator is still running: Monitors carry a
+		// finalizer only it can remove, and AfterSuite uninstalls it next.
+		waitForNamespaceGone(testNamespace, timeout, interval)
 	})
 
 	It("serves the Monitor CRD installed by the chart", func() {
