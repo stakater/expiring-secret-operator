@@ -1,0 +1,49 @@
+name: Helm Install E2E
+
+# The shared operator_e2e workflow only runs the kustomize-based suite
+# (`make test-e2e`). This repo-local job covers the Helm install path instead:
+# it builds the operator image, brings up Kind, installs the operator from the
+# generated chart, and asserts it reconciles (see test/e2e_helm).
+#
+# It fires only on changes that can affect the chart or its install so it does
+# not add a Kind job to every PR.
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+      - release
+    paths:
+      - 'config/**'
+      - 'hack/helm-overrides/**'
+      - 'Makefile'
+      - 'makefiles/common.mk'
+      - 'test/e2e_helm/**'
+      - 'test/utils/**'
+      - '.github/workflows/e2e_helm.yaml'
+
+jobs:
+  helm-install-e2e:
+    name: Helm Install E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.12.3
+
+      # Builds the image, creates Kind, loads the image, installs the
+      # Prometheus Operator CRDs (the chart ships a ServiceMonitor and
+      # PrometheusRule), generates the chart, and runs the suite. No registry
+      # secret is needed: the image is loaded into Kind locally and the chart
+      # install is pointed at it.
+      - name: Run Helm-install e2e
+        run: make test-e2e-helm
