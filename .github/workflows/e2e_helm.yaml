@@ -21,6 +21,14 @@ on:
       - 'test/e2e_helm/**'
       - 'test/utils/**'
       - '.github/workflows/e2e_helm.yaml'
+      # Image-affecting changes: a Dockerfile, manager entrypoint (flags,
+      # probe/metrics ports) or dependency change can break the Helm install
+      # without touching the chart. The shared e2e job is skipped on PRs here,
+      # so this job is the only thing that would catch it.
+      - 'Dockerfile'
+      - 'cmd/**'
+      - 'go.mod'
+      - 'go.sum'
 
 jobs:
   helm-install-e2e:
@@ -35,10 +43,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.12.3
+      # Helm is downloaded by the `helm` make target (pinned HELM_VERSION) as a
+      # dependency of test-e2e-helm, so no separate setup-helm step is needed.
 
       # Builds the image, creates Kind, loads the image, installs the
       # Prometheus Operator CRDs (the chart ships a ServiceMonitor and
