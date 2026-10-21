@@ -1,4 +1,4 @@
-VERSION ?= 0.0.3
+VERSION ?= 0.0.4
 OPERATOR_NAME ?= expiring-secret-operator
 #OPERATOR_NAME ?= expiring-secrets
 PROJECT_NAME ?= expiring-secrets.stakater.com
