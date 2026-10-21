@@ -34,7 +34,7 @@ kind: Secret
 metadata:
   name: docker-registry-token
   labels:
-    expiringsecret.stakater.com/validUntil: "2026-03-15"  # YYYY-MM-DD format
+    expiring-secrets.stakater.com/validUntil: "2026-03-15"  # YYYY-MM-DD format
 data:
   token: <base64-encoded-token>
 ```
@@ -250,7 +250,7 @@ flowchart TD
 ## Requirements
 
 - Kubernetes 1.25+
-- Secrets must have `expiringsecret.stakater.com/validUntil` label in `YYYY-MM-DD` format
+- Secrets must have `expiring-secrets.stakater.com/validUntil` label in `YYYY-MM-DD` format
 - Prometheus operator (for ServiceMonitor/PrometheusRule)
 
 ## License
