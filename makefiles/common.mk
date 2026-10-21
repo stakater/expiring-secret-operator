@@ -376,6 +376,7 @@ common-helm-release: manifests kustomize helmify-bin yq download-helm-mk ## Down
 		KUSTOMIZE=$(KUSTOMIZE) \
 		HELM_CHART_NAME=$(OPERATOR_NAME) \
 		HELMIFY_ARGS="-original-name" \
+		HELMIFY_POSTPROCESS=./hack/helm-overrides/apply.sh \
 		HELM_REGISTRY=$(HELM_REGISTRY) \
 		IMG=$(IMG)
 

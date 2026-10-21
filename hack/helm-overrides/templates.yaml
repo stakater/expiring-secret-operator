@@ -69,6 +69,15 @@ metrics-service.yaml:
   - search: "name: expiring-secret-operator"
     replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
 
+  # Shorten the Service object name. helmify keeps the verbose kustomize name
+  # (<fullname>-controller-manager-metrics-service); once Helm prepends the
+  # release name a Service name can exceed the 63-char DNS label limit, which
+  # fails `helm lint --strict`. The ServiceMonitor selects this Service by
+  # label (control-plane: controller-manager) and port, not by name, so the
+  # rename is safe.
+  - search: "-controller-manager-metrics-service"
+    replace: "-metrics"
+
 monitor-admin-rbac.yaml:
   - search: "name: expiring-secret-operator"
     replace: "name: {{ include \"expiring-secret-operator.fullname\" . }}"
