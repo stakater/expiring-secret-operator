@@ -88,4 +88,24 @@ deploy-monitoring: kustomize ## Deploy a dev Prometheus into Kind to verify scra
 undeploy-monitoring: kustomize ## Remove the dev Prometheus from Kind.
 	-$(KUSTOMIZE) build test/monitoring | $(KUBECTL) delete --ignore-not-found=true -f -
 
+.PHONY: test-e2e-helm
+test-e2e-helm: ## Install the operator from its Helm chart into Kind and verify it reconciles (test/e2e_helm).
+	# Build the controller image, bring up Kind, load the image, and generate
+	# the chart (with overrides) the same way the release pipeline does.
+	$(MAKE) manifests docker-build
+	$(MAKE) cluster
+	$(MAKE) load-image
+	# The chart ships a ServiceMonitor and PrometheusRule, so the Prometheus
+	# Operator CRDs must exist before `helm install` (the README documents this
+	# as a prerequisite). Install them into the Kind cluster first.
+	$(MAKE) install-prometheus-operator
+	$(MAKE) helmify HELM_CHART_NAME=$(OPERATOR_NAME)
+	# Point the chart install at the locally built+loaded image, splitting IMG
+	# (registry/name:tag) into its repository and tag halves.
+	HELM_E2E_CHART=charts/$(OPERATOR_NAME) \
+	HELM_E2E_IMAGE_REPO=$(firstword $(subst :, ,$(IMG))) \
+	HELM_E2E_IMAGE_TAG=$(lastword $(subst :, ,$(IMG))) \
+	PATH="$(LOCALBIN):$$PATH" \
+	go test $(GOOPTS) ./test/e2e_helm/ $(TEST_ARGS)
+
 include makefiles/common.mk

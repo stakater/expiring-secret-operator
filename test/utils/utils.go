@@ -232,6 +232,12 @@ func GetProjectDir() (string, error) {
 	if err != nil {
 		return wd, err
 	}
-	wd = strings.ReplaceAll(wd, "/test/e2e", "")
+	// Return the project root: everything before the first "/test/" segment.
+	// Cutting on the segment (rather than stripping a hardcoded "/test/e2e")
+	// keeps this correct for any test package under test/, e.g. test/e2e and
+	// test/e2e_helm — the latter would otherwise leave a bogus "_helm" suffix.
+	if i := strings.Index(wd, "/test/"); i != -1 {
+		wd = wd[:i]
+	}
 	return wd, nil
 }
