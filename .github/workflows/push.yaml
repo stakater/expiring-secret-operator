@@ -27,4 +27,8 @@ jobs:
       ENABLE_UNIT_TESTS: true
       #ENABLE_STAKATER_AB_GIT_AUTH: true
       #ENABLE_CHART_PUSH: true
-      #TAGGING_STRATEGY: "commit-sha"
+      # Tag master/dev builds as vX.Y.Z-<sha> (a SemVer pre-release) instead of
+      # a clean vX.Y.Z. A clean tag then means a real release only, so nothing
+      # mistakes a dev build for a release (e.g. Renovate pinning the deploy
+      # manifest to an unreleased image). Matches mto-dependencies-operator.
+      TAGGING_STRATEGY: "commit-sha"
