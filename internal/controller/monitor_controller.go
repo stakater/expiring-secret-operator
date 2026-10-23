@@ -118,13 +118,11 @@ func (r *MonitorReconciler) stripLegacyFinalizer(s *reconcileState) (bool, error
 func (r *MonitorReconciler) observeSource(s *reconcileState) (ctrl.Result, error) {
 	sourceObj, err := r.getSourceObject(s)
 	if err != nil {
-		s.log.Error(err, "Failed to get source Secret", "reference", s.monitor.Spec.SecretRef)
 		return r.handleSourceError(s, err)
 	}
 
 	validUntil, parseErr := parseValidUntil(s.log, sourceObj)
 	if parseErr != nil {
-		s.log.Error(parseErr, "Failed to parse source Secret", "reference", s.monitor.Spec.SecretRef)
 		return r.handleError(s, parseErr, parseErr.Reason, parseErr.Message)
 	}
 
@@ -166,7 +164,7 @@ func (r *MonitorReconciler) handleError(s *reconcileState, cause error, reason, 
 	}
 	s.monitor.Status.State = expiringsecretv1alpha1.MonitorStateError
 	s.monitor.Status.Message = message
-	s.log.V(1).Info("Handling Monitor error", "reason", reason, "message", message)
+	logFailure(s.log, cause, reason, message)
 
 	// Drop the value gauges, whose expiry is unknown, but keep publishing the
 	// state so a failing Monitor stays alertable rather than going silent.
@@ -180,6 +178,16 @@ func (r *MonitorReconciler) handleError(s *reconcileState, cause error, reason, 
 		return ctrl.Result{}, errors.Join(cmp.Or(cause, errors.New(message)), patchErr)
 	}
 	return ctrl.Result{RequeueAfter: time.Minute}, patchErr
+}
+
+// logFailure logs a failing Monitor once: a user error at Info, since the
+// user must fix it, and an API error at Error.
+func logFailure(log logr.Logger, cause error, reason, message string) {
+	if reason == ReasonAPIError {
+		log.Error(cause, "Monitor failed", "reason", reason, "message", message)
+		return
+	}
+	log.Info("Monitor failed", "reason", reason, "message", message)
 }
 
 // SetupWithManager sets up the controller with the Manager.

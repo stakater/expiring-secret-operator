@@ -93,7 +93,7 @@ func parseValidUntil(log logr.Logger, sourceObj client.Object) (time.Time, *Moni
 	labels := sourceObj.GetLabels()
 	if labels == nil {
 		msg := fmt.Sprintf("Source object does not have any labels, expected %s label", LabelKey)
-		log.Error(nil, msg, "name", sourceObj.GetName(), "namespace", sourceObj.GetNamespace())
+		log.V(1).Info(msg)
 		return validUntil, &MonitorErrorReasonMessage{
 			Reason:  ReasonSourceLabelNotFound,
 			Message: msg,
@@ -102,12 +102,7 @@ func parseValidUntil(log logr.Logger, sourceObj client.Object) (time.Time, *Moni
 	validUntilStr, exists := labels[LabelKey]
 	if !exists {
 		msg := fmt.Sprintf("Source object does not have %s label", LabelKey)
-		log.Error(nil, msg,
-			"name", sourceObj.GetName(),
-			"namespace", sourceObj.GetNamespace(),
-			"labelPresent", exists,
-			"expectedLabel", LabelKey,
-		)
+		log.V(1).Info(msg)
 		return validUntil, &MonitorErrorReasonMessage{
 			Reason:  ReasonSourceLabelNotFound,
 			Message: msg,
@@ -117,7 +112,7 @@ func parseValidUntil(log logr.Logger, sourceObj client.Object) (time.Time, *Moni
 	validUntil, err := time.Parse("2006-01-02", validUntilStr)
 	if err != nil {
 		msg := fmt.Sprintf("Failed to parse validUntil date (expected YYYY-MM-DD format): %v", err)
-		log.Error(err, "Failed to parse validUntil date", "validUntil", validUntilStr)
+		log.V(1).Info("Failed to parse validUntil date", "validUntil", validUntilStr)
 		return validUntil, &MonitorErrorReasonMessage{
 			Reason:  ReasonSourceLabelInvalid,
 			Message: msg,

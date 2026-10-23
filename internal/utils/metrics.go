@@ -249,7 +249,7 @@ func (m *Metric) SetError() error {
 	}
 	stateGauge.Set(1)
 
-	m.logger.Info("Published error state metric", "labels", labels)
+	m.logger.V(1).Info("Published error state metric", "labels", labels)
 	return nil
 }
 

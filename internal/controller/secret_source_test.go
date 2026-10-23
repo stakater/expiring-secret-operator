@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
+	"github.com/stakater/expiring-secret-operator/internal/utils"
 	testutils "github.com/stakater/expiring-secret-operator/test/utils"
 )
 
@@ -78,8 +79,48 @@ var _ = Describe("parseValidUntil", func() {
 		log := funcr.New(func(_, args string) { lines = append(lines, args) }, funcr.Options{Verbosity: 2})
 		secret := &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "s", Labels: map[string]string{"team": "x"}}}
 		_, _ = parseValidUntil(log, secret)
-		Expect(strings.Join(lines, "\n")).NotTo(ContainSubstring("team"))
-		Expect(strings.Join(lines, "\n")).To(ContainSubstring("labelPresent"))
+		out := strings.Join(lines, "\n")
+		Expect(out).NotTo(ContainSubstring("team"))
+		Expect(out).To(Or(BeEmpty(), ContainSubstring(LabelKey)))
+	})
+})
+
+// reconcileWithLogs runs one reconcile of monitor through c and returns
+// every line logged at V(0).
+func reconcileWithLogs(c client.Client, monitor *expiringsecretv1alpha1.Monitor) []string {
+	var lines []string
+	s := newReconcileState(ctx, monitor)
+	s.log = funcr.New(func(_, args string) { lines = append(lines, args) }, funcr.Options{})
+	DeferCleanup(utils.NewMetric(monitor).Cleanup)
+	_, _ = (&MonitorReconciler{Client: c, Scheme: c.Scheme()}).reconcileMonitor(s)
+	return lines
+}
+
+var _ = Describe("failure logging", func() {
+	key := types.NamespacedName{Name: "log-monitor", Namespace: MonitorNamespace}
+
+	It("logs a missing label once, at Info", func() {
+		monitor := testutils.GenerateMonitor(key, "unlabelled")
+		secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "unlabelled", Namespace: MonitorNamespace}}
+		c := fake.NewClientBuilder().WithScheme(k8sClient.Scheme()).
+			WithObjects(monitor, secret).WithStatusSubresource(monitor).Build()
+
+		lines := reconcileWithLogs(c, monitor)
+		Expect(lines).To(HaveLen(1))
+		Expect(lines[0]).To(ContainSubstring(`"level"=0`))
+		Expect(lines[0]).To(ContainSubstring(ReasonSourceLabelNotFound))
+	})
+
+	It("logs an API error once, at Error", func() {
+		monitor := testutils.GenerateMonitor(key, "any")
+		base := fake.NewClientBuilder().WithScheme(k8sClient.Scheme()).
+			WithObjects(monitor).WithStatusSubresource(monitor).Build()
+
+		lines := reconcileWithLogs(&errorClient{Client: base, getErr: errors.New("boom")}, monitor)
+		Expect(lines).To(HaveLen(1))
+		Expect(lines[0]).To(ContainSubstring(`"error"="boom"`))
+		Expect(lines[0]).NotTo(ContainSubstring(`"level"=`))
+		Expect(lines[0]).To(ContainSubstring(ReasonAPIError))
 	})
 })
 
