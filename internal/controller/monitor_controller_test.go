@@ -194,7 +194,7 @@ var _ = Describe("Monitor Controller", func() {
 			_, err := h.ReconcileOnce(newReconciler(), nsMonitor)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Checking the Monitor status shows error")
+			By("Checking the Monitor status shows Valid")
 			h.ExpectStatusEventually(nsMonitor, timeout, interval,
 				func(found *expiringsecretv1alpha1.Monitor) bool {
 					return found.Status.State == expiringsecretv1alpha1.MonitorStateValid && // 15 days should be in Info state (between 30 and 14 days)
@@ -577,7 +577,7 @@ var _ = Describe("Monitor Controller", func() {
 			_, err = h.ReconcileOnce(newReconciler(), nsMonitor)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Checking the Monitor status shows error")
+			By("Checking the Monitor status shows Valid")
 			h.ExpectStatusEventually(nsMonitor, timeout, interval,
 				func(found *expiringsecretv1alpha1.Monitor) bool {
 					return found.Status.State == expiringsecretv1alpha1.MonitorStateValid && // 15 days should be in Info state (between 30 and 14 days)
