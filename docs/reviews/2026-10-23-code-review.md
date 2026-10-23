@@ -309,6 +309,8 @@ the controller actually uses.
 
 ### C-10 Info-level log noise on every reconcile (Low)
 
+> Fixed in PR #53.
+
 **Where:** `monitor_controller.go` lines 86, 98, 415, 424-426;
 `cmd/main.go` lines 72-74.
 
@@ -352,6 +354,10 @@ specs, and add the missing scenarios as table-driven `DescribeTable`
 entries where they share a shape. Add `-race` to `common-test`.
 
 ### C-12 Documentation drifted from the code (Low)
+
+> Partly fixed in PR #53: the Check Status column, the reconciliation
+> flowchart and the same-namespace rule. The remaining items belong to the
+> packaging and docs piece.
 
 **Where:** `README.md`, `DEPLOY.md`, `config/manifests/patches`.
 

@@ -258,6 +258,8 @@ cert-manager `Certificate` with the same wiring. Add a NetworkPolicy
 
 ### S-06 Development-mode logging in production (Medium)
 
+> Fixed in PR #53.
+
 **Where:** `cmd/main.go` lines 72-74; `monitor_controller.go` lines
 285-290.
 
