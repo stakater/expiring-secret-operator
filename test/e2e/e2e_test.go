@@ -88,6 +88,10 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			)
 		})
 
+		// Must stay below the controller's one-minute re-check so recovery specs
+		// prove the watch, not the poll.
+		const watchTimeout = 30 * time.Second
+
 		inState := func(st expiringsecretv1alpha1.MonitorState) func(*expiringsecretv1alpha1.Monitor) bool {
 			return func(m *expiringsecretv1alpha1.Monitor) bool { return m.Status.State == st }
 		}
@@ -242,7 +246,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, utils.GenerateValidDaysSecret(nsSecret, 365))).To(Succeed())
 
 			By("waiting for monitor to recover to Valid")
-			h.ExpectStatusEventually(nsMonitor, timeout, interval,
+			h.ExpectStatusEventually(nsMonitor, watchTimeout, interval,
 				inState(expiringsecretv1alpha1.MonitorStateValid))
 		})
 
@@ -256,13 +260,14 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 			By("adding only the validUntil label")
 			Expect(k8sClient.Get(ctx, nsSecret, secret)).To(Succeed())
-			secret.Labels = map[string]string{
-				utils.ValidUntilLabel: time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02"),
+			if secret.Labels == nil {
+				secret.Labels = map[string]string{}
 			}
+			secret.Labels[utils.ValidUntilLabel] = time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02")
 			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
 
 			By("waiting for monitor to recover to Valid")
-			h.ExpectStatusEventually(nsMonitor, timeout, interval,
+			h.ExpectStatusEventually(nsMonitor, watchTimeout, interval,
 				inState(expiringsecretv1alpha1.MonitorStateValid))
 		})
 
