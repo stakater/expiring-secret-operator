@@ -40,6 +40,65 @@ import (
 	"github.com/stakater/expiring-secret-operator/test/utils"
 )
 
+const (
+	projectName = "expiring-secret-operator"
+	namespace   = projectName + "-system"
+	svcName     = projectName + "-controller-manager-metrics-service"
+	crbName     = projectName + "-metrics-binding"
+	managerName = projectName + "-controller-manager"
+)
+
+// runCurlPod runs command in a throwaway curl pod and returns its logs.
+func runCurlPod(namespace, command string) string {
+	By("running curl pod")
+	// Run pod without -it flags for CI compatibility
+	_, err := utils.Run(exec.Command("kubectl", "run", "curl-metrics",
+		"--restart=Never", "--image=curlimages/curl:7.87.0", "-n", namespace,
+		"--", "/bin/sh", "-c", command))
+	Expect(err).NotTo(HaveOccurred())
+
+	By("waiting for curl pod to complete")
+	_, _ = utils.Run(exec.Command("kubectl", "wait",
+		"--for=jsonpath={.status.phase}=Succeeded", "pod/curl-metrics",
+		"-n", namespace, "--timeout=30s"))
+
+	By("retrieving logs from curl pod")
+	output, err := utils.Run(exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(output).NotTo(BeEmpty())
+
+	By("deleting curl pod")
+	_, _ = utils.Run(exec.Command("kubectl", "delete", "pod", "curl-metrics",
+		"-n", namespace, "--ignore-not-found=true"))
+	return string(output)
+}
+
+// ensureMetricsAccess creates the metrics-reader binding and returns a token.
+func ensureMetricsAccess() string {
+	By("creating cluster role binding for metrics access")
+	_, err := utils.Run(exec.Command("kubectl", "create", "clusterrolebinding", crbName,
+		fmt.Sprintf("--clusterrole=%s-metrics-reader", projectName),
+		fmt.Sprintf("--serviceaccount=%s:%s", namespace, managerName)))
+	if err != nil {
+		Expect(err.Error()).To(ContainSubstring("AlreadyExists"))
+	}
+
+	By("creating serviceaccount token for authentication")
+	token, err := utils.Run(exec.Command("kubectl", "create", "token", managerName,
+		"-n", namespace, "--duration=10m"))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(token).NotTo(BeEmpty())
+	return string(token)
+}
+
+// fetchMetrics returns the controller's /metrics body.
+func fetchMetrics() string {
+	token := ensureMetricsAccess()
+	return runCurlPod(namespace, fmt.Sprintf(
+		"curl -k -H \"Authorization: Bearer %s\" https://%s.%s.svc.cluster.local:8443/metrics",
+		token, svcName, namespace))
+}
+
 var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 	const (
 		timeout  = time.Second * 120
@@ -394,11 +453,6 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 	Context("Prometheus Metrics", func() {
 		var (
 			testNamespace = "test-e2e-metrics"
-			projectName   = "expiring-secret-operator"
-			namespace     = fmt.Sprintf("%s-system", projectName)
-			svcName       = fmt.Sprintf("%s-controller-manager-metrics-service", projectName)
-			crbName       = fmt.Sprintf("%s-metrics-binding", projectName)
-			managerName   = fmt.Sprintf("%s-controller-manager", projectName)
 
 			validSecret    types.NamespacedName
 			validMonitor   types.NamespacedName
@@ -490,81 +544,16 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			}, timeout, interval).Should(BeTrue())
 		})
 
-		curl := func(url string) []byte {
-			By("running curl pod to fetch metrics")
-			// Run pod without -it flags for CI compatibility
-			cmd := exec.Command("kubectl", "run", "curl-metrics",
-				"--restart=Never",
-				"--image=curlimages/curl:7.87.0",
-				"-n", namespace,
-				"--", "/bin/sh", "-c",
-				url,
-			)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Wait for pod to complete (either Succeeded or Failed)
-			By("waiting for curl pod to complete")
-			cmd = exec.Command("kubectl", "wait",
-				"--for=jsonpath={.status.phase}=Succeeded",
-				"pod/curl-metrics",
-				"-n", namespace,
-				"--timeout=30s",
-			)
-			_, _ = utils.Run(cmd)
-
-			// Get logs from the pod
-			By("retrieving logs from curl pod")
-			cmd = exec.Command("kubectl", "logs", "curl-metrics",
-				"-n", namespace,
-			)
-			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).NotTo(BeEmpty())
-
-			// Delete the pod
-			By("deleting curl pod")
-			cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics",
-				"-n", namespace,
-				"--ignore-not-found=true",
-			)
-			_, _ = utils.Run(cmd)
-
-			return output
-		}
-
 		It("should expose metrics endpoint", func() {
-			By("creating cluster role binding for metrics access")
-			cmd := exec.Command("kubectl", "create", "clusterrolebinding",
-				crbName,
-				fmt.Sprintf("--clusterrole=%s-metrics-reader", projectName),
-				fmt.Sprintf("--serviceaccount=%s:%s-controller-manager", namespace, projectName),
-			)
-			_, _ = utils.Run(cmd)
-
-			By("creating serviceaccount token for authentication")
-			cmd = exec.Command("kubectl", "create", "token", managerName,
-				"-n", namespace,
-				"--duration=10m",
-			)
-			token, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(token).NotTo(BeEmpty())
-
-			By("curling metrics endpoint using serviceaccount token")
-			curlCommand := fmt.Sprintf("curl -k -H \"Authorization: Bearer %s\" "+
-				"https://%s.%s.svc.cluster.local:8443/metrics",
-				string(token), svcName, namespace)
-
-			output := curl(curlCommand)
+			output := fetchMetrics()
 
 			dir, err := os.Getwd()
 			Expect(err).NotTo(HaveOccurred())
 			file := filepath.Join(dir, "metrics_output.txt")
-			writeErr := os.WriteFile(file, output, 0644)
+			writeErr := os.WriteFile(file, []byte(output), 0644)
 			Expect(writeErr).NotTo(HaveOccurred())
 
-			outputStr := string(output)
+			outputStr := output
 
 			By("verifying that metrics output contains expected metric " + validUntilMetricName)
 			Expect(outputStr).To(
@@ -595,10 +584,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			// Cleanup created resources
 
 			By("removing cluster role binding for metrics access")
-			cmd = exec.Command("kubectl", "delete", "clusterrolebinding",
-				crbName,
-			)
-			_, err = utils.Run(cmd)
+			_, err = utils.Run(exec.Command("kubectl", "delete", "clusterrolebinding", crbName))
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -634,7 +620,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 				`curl -s "http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/query?query=%s"`,
 				url.QueryEscape(query))
 
-			output := curl(curlCommand)
+			output := []byte(runCurlPod(namespace, curlCommand))
 
 			By("verifying the target was actually scraped successfully (up == 1)")
 			// The instant-query API returns the same "value" shape whether
@@ -652,5 +638,44 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 				"expected up==1 (target successfully scraped), got up==%s; full response: %s",
 				matches[1], string(output))
 		})
+	})
+})
+
+var _ = Describe("Monitor deletion without the operator", Ordered, func() {
+	It("can be deleted while the operator is down", func() {
+		h := utils.NewHelper(ctx, k8sClient)
+		nsSecret := h.NsName("down-secret", "e2e-operator-down")
+		nsMonitor := h.NsName("down-monitor", "e2e-operator-down")
+		h.VerifyNamespaces(nsSecret, nsMonitor)
+		kubectl := func(args ...string) {
+			_, err := utils.Run(exec.Command("kubectl", args...))
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		Expect(k8sClient.Create(ctx, utils.GenerateValidDaysSecret(nsSecret, 365))).To(Succeed())
+		monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
+		Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+		Eventually(func() expiringsecretv1alpha1.MonitorState {
+			_ = k8sClient.Get(ctx, nsMonitor, monitor)
+			return monitor.Status.State
+		}, 120*time.Second, 2*time.Second).Should(Equal(expiringsecretv1alpha1.MonitorStateValid))
+
+		By("stopping the operator")
+		kubectl("-n", namespace, "scale", "deploy/"+managerName, "--replicas=0")
+		kubectl("wait", "--for=delete", "pod", "-l", "control-plane=controller-manager",
+			"-n", namespace, "--timeout=90s")
+
+		By("deleting the Monitor with no operator running")
+		Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+		Eventually(func() bool {
+			return apierrors.IsNotFound(k8sClient.Get(ctx, nsMonitor, &expiringsecretv1alpha1.Monitor{}))
+		}, 30*time.Second, time.Second).Should(BeTrue())
+
+		By("restarting the operator")
+		kubectl("-n", namespace, "scale", "deploy/"+managerName, "--replicas=1")
+		kubectl("-n", namespace, "rollout", "status", "deploy/"+managerName, "--timeout=120s")
+
+		By("checking the deleted Monitor's series are gone")
+		Expect(fetchMetrics()).NotTo(ContainSubstring(fmt.Sprintf("monitor_name=%q", nsMonitor.Name)))
 	})
 })
