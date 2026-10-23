@@ -127,6 +127,7 @@ var _ = Describe("Monitor Controller", func() {
 				Scheme:                 scheme,
 				Metrics:                metricsserver.Options{BindAddress: "0"},
 				HealthProbeBindAddress: "0",
+				Cache:                  SecretCacheOptions(),
 			})
 			Expect(err).NotTo(HaveOccurred())
 

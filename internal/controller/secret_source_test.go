@@ -164,3 +164,40 @@ var _ = DescribeTable("mapSecretToMonitor",
 		types.NamespacedName{Namespace: "a", Name: "s"}, errors.New("list failed"),
 		nil),
 )
+
+var _ = Describe("stripSecretMetadata", func() {
+	It("drops annotations and managed fields and keeps identity and labels", func() {
+		obj := &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+			Name: "s", Namespace: "a", Labels: map[string]string{LabelKey: "2030-01-01"},
+			Annotations:   map[string]string{"kubectl.kubernetes.io/last-applied-configuration": `{"data":{}}`},
+			ManagedFields: []metav1.ManagedFieldsEntry{{Manager: "kubectl"}},
+		}}
+		out, err := stripSecretMetadata(obj)
+		Expect(err).NotTo(HaveOccurred())
+		got := out.(*metav1.PartialObjectMetadata)
+		Expect(got.Annotations).To(BeNil())
+		Expect(got.ManagedFields).To(BeNil())
+		Expect(got.Name).To(Equal("s"))
+		Expect(got.Namespace).To(Equal("a"))
+		Expect(got.Labels).To(HaveKeyWithValue(LabelKey, "2030-01-01"))
+	})
+
+	It("passes other objects through unchanged", func() {
+		monitor := &expiringsecretv1alpha1.Monitor{ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{"keep": "me"},
+		}}
+		out, err := stripSecretMetadata(monitor)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out).To(BeIdenticalTo(monitor))
+		Expect(monitor.Annotations).To(HaveKey("keep"))
+	})
+
+	It("is installed for Secrets only", func() {
+		byObject := SecretCacheOptions().ByObject
+		Expect(byObject).To(HaveLen(1))
+		for obj, opts := range byObject {
+			Expect(obj.GetObjectKind().GroupVersionKind().Kind).To(Equal("Secret"))
+			Expect(opts.Transform).NotTo(BeNil())
+		}
+	})
+})

@@ -49,7 +49,8 @@ known mitigation.
 
 ### S-01 Every Secret in the cluster is cached in memory (High)
 
-> Fixed in PR #51.
+> Fixed in PR #51; annotations and managed fields are stripped from the cache
+> in the follow-up PR.
 
 **Where:** `internal/controller/monitor_controller.go` lines 259
 (`r.Get` of the Secret) and 510-518 (`Watches(&corev1.Secret{}, ...)`);

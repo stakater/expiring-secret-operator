@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -42,11 +43,36 @@ const LabelKey = "expiring-secrets.stakater.com/validUntil"
 // errSecretNotFound reports that the referenced Secret does not exist.
 var errSecretNotFound = errors.New("referenced secret not found")
 
+// secretMetadata returns an empty metadata-only Secret.
+func secretMetadata() *metav1.PartialObjectMetadata {
+	secret := &metav1.PartialObjectMetadata{}
+	secret.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Secret"))
+	return secret
+}
+
+// SecretCacheOptions strips cached Secret metadata down to what the
+// controller reads. Scoped to Secrets: a default transform would also strip
+// cached Monitors, which the legacy-finalizer Update writes back.
+func SecretCacheOptions() cache.Options {
+	return cache.Options{ByObject: map[client.Object]cache.ByObject{
+		secretMetadata(): {Transform: stripSecretMetadata},
+	}}
+}
+
+// stripSecretMetadata drops annotations and managed fields, which can carry
+// the Secret payload (kubectl's last-applied-configuration).
+func stripSecretMetadata(obj interface{}) (interface{}, error) {
+	if meta, ok := obj.(*metav1.PartialObjectMetadata); ok {
+		meta.Annotations = nil
+		meta.ManagedFields = nil
+	}
+	return obj, nil
+}
+
 // getSourceObject reads only the metadata of the referenced Secret, never its payload.
 func (r *MonitorReconciler) getSourceObject(s *reconcileState) (*metav1.PartialObjectMetadata, error) {
 	// A Monitor may only watch a Secret in its own namespace.
-	secret := &metav1.PartialObjectMetadata{}
-	secret.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Secret"))
+	secret := secretMetadata()
 	secretKey := types.NamespacedName{
 		Name:      s.monitor.Spec.SecretRef.Name,
 		Namespace: s.monitor.Namespace,

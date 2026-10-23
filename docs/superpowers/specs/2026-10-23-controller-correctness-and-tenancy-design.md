@@ -110,6 +110,9 @@ lookup reads a `metav1.PartialObjectMetadata` with the Secret GVK set.
 The informer cache then stores `ObjectMeta` only. No label selector is
 applied to the cache (my call), so a Secret without the label still
 produces the specific "label missing" error rather than "not found".
+The cached Secret metadata is stored without annotations and managed
+fields, so a `last-applied-configuration` annotation cannot carry the
+payload into memory.
 
 The mapping function queries a field index instead of listing every
 Monitor. The index key is `spec.secretRef.name`, and the query is scoped
