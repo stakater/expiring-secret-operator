@@ -61,6 +61,16 @@ var _ = Describe("Monitor status logic", func() {
 			0, expiringsecretv1alpha1.MonitorStateExpired),
 	)
 
+	It("defaults nil thresholds without writing them to spec", func() {
+		monitor := &expiringsecretv1alpha1.Monitor{}
+		now := time.Now()
+		calculateState(monitor, now.Add(10*24*time.Hour), now)
+		Expect(monitor.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateWarning))
+		setStatusMessage(monitor)
+		Expect(monitor.Status.Message).To(Equal("Secret expires in less than 14 days"))
+		Expect(monitor.Spec.AlertThresholds).To(BeNil())
+	})
+
 	It("should handle setStatusMessage with nil ExpiresAt", func() {
 		monitor := &expiringsecretv1alpha1.Monitor{
 			Status: expiringsecretv1alpha1.MonitorStatus{

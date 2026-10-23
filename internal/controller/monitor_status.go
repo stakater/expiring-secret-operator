@@ -97,34 +97,35 @@ func applyConditions(m *expiringsecretv1alpha1.Monitor, reason, message string) 
 	}
 }
 
+// thresholdsOrDefault returns the Monitor's thresholds, or the CRD defaults
+// when the CRD has not been upgraded to set them (Helm skips crds/ on upgrade).
+func thresholdsOrDefault(m *expiringsecretv1alpha1.Monitor) expiringsecretv1alpha1.AlertThresholds {
+	if m.Spec.AlertThresholds == nil {
+		return expiringsecretv1alpha1.AlertThresholds{InfoDays: 30, WarningDays: 14, CriticalDays: 7}
+	}
+	return *m.Spec.AlertThresholds
+}
+
 // calculateState determines the current state based on alert thresholds
 func calculateState(m *expiringsecretv1alpha1.Monitor, validUntil, now time.Time) {
-	// Update the Monitor status
-	lastchecked := metav1.NewTime(now)
+	lastchecked, expiresAt := metav1.NewTime(now), metav1.NewTime(validUntil)
 	secondsRemaining := validUntil.Sub(now).Seconds()
-	expiresAt := metav1.NewTime(validUntil)
 	secondsRemainingInt := int64(secondsRemaining)
-
-	// Update status fields
-	m.Status.LastChecked = &lastchecked
-	m.Status.ExpiresAt = &expiresAt
+	m.Status.LastChecked, m.Status.ExpiresAt = &lastchecked, &expiresAt
 	m.Status.SecondsRemaining = &secondsRemainingInt
 
-	if secondsRemaining <= 0 {
+	daysRemaining, t := secondsRemaining/(24*60*60), thresholdsOrDefault(m)
+	switch {
+	case secondsRemaining <= 0:
 		m.Status.State = expiringsecretv1alpha1.MonitorStateExpired
-		return
-	}
-
-	m.Status.State = expiringsecretv1alpha1.MonitorStateValid
-
-	daysRemaining := secondsRemaining / (24 * 60 * 60)
-
-	if daysRemaining <= float64(m.Spec.AlertThresholds.CriticalDays) {
+	case daysRemaining <= float64(t.CriticalDays):
 		m.Status.State = expiringsecretv1alpha1.MonitorStateCritical
-	} else if daysRemaining <= float64(m.Spec.AlertThresholds.WarningDays) {
+	case daysRemaining <= float64(t.WarningDays):
 		m.Status.State = expiringsecretv1alpha1.MonitorStateWarning
-	} else if daysRemaining <= float64(m.Spec.AlertThresholds.InfoDays) {
+	case daysRemaining <= float64(t.InfoDays):
 		m.Status.State = expiringsecretv1alpha1.MonitorStateInfo
+	default:
+		m.Status.State = expiringsecretv1alpha1.MonitorStateValid
 	}
 }
 
@@ -139,20 +140,17 @@ func setStatusMessage(m *expiringsecretv1alpha1.Monitor) {
 		m.Status.Message = "Seconds until expiration is not available"
 		return
 	}
-	message := ""
+	message, t := "", thresholdsOrDefault(m)
 	switch m.Status.State {
 	case expiringsecretv1alpha1.MonitorStateValid:
 		message = fmt.Sprintf(secretIsValid,
 			m.Status.ExpiresAt.Format("2006-01-02"))
 	case expiringsecretv1alpha1.MonitorStateInfo:
-		message = fmt.Sprintf(secretExpiresIn,
-			m.Spec.AlertThresholds.InfoDays)
+		message = fmt.Sprintf(secretExpiresIn, t.InfoDays)
 	case expiringsecretv1alpha1.MonitorStateWarning:
-		message = fmt.Sprintf(secretExpiresIn,
-			m.Spec.AlertThresholds.WarningDays)
+		message = fmt.Sprintf(secretExpiresIn, t.WarningDays)
 	case expiringsecretv1alpha1.MonitorStateCritical:
-		message = fmt.Sprintf(secretExpiresIn,
-			m.Spec.AlertThresholds.CriticalDays)
+		message = fmt.Sprintf(secretExpiresIn, t.CriticalDays)
 	case expiringsecretv1alpha1.MonitorStateExpired:
 		message = fmt.Sprintf(secretExpiredOn,
 			m.Status.ExpiresAt.Format("2006-01-02"))
