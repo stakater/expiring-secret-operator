@@ -171,7 +171,10 @@ type MonitorStatus struct {
 // +kubebuilder:printcolumn:name="Service",type="string",JSONPath=".spec.service"
 // +kubebuilder:printcolumn:name="Secret",type="string",JSONPath=".spec.secretRef.name"
 // +kubebuilder:printcolumn:name="State",type="string",JSONPath=".status.state"
-// +kubebuilder:printcolumn:name="Expires At",type="date",JSONPath=".status.expiresAt"
+// Expires At is a string, not a date, column: kubectl renders a date column as
+// time elapsed since the value (like Age), which is "<invalid>" for a future
+// timestamp. As a string it shows the actual RFC3339 expiry.
+// +kubebuilder:printcolumn:name="Expires At",type="string",JSONPath=".status.expiresAt"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +operator-sdk:csv:customresourcedefinitions:displayName="Expiring Secrets Monitor"
 // This annotation provides a hint for OLM which resources are managed by Monitor kind.
