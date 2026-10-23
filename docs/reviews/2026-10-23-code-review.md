@@ -95,6 +95,8 @@ the unit-test invocation in `common.mk` so a regression is caught.
 
 ### C-02 `Error` state is sticky; label-only Secret edits are ignored (High)
 
+> Fixed in PR #51.
+
 **Where:** `monitor_controller.go` line 216 (`handleError` returns an empty
 `Result`), lines 479-500 (`secretUpdatePredicate`).
 
@@ -241,6 +243,8 @@ write all of them, in both success and error paths. Set
 add `Unknown` to the `enum` or delete the constant.
 
 ### C-07 Every Secret event in the cluster lists every Monitor (Medium)
+
+> Fixed in PR #51.
 
 **Where:** `monitor_controller.go` lines 408-441, 510-518.
 
@@ -426,6 +430,8 @@ verify the binary executes (`$(1) --help >/dev/null`) before trusting it.
 Use `go env GOOS/GOARCH` in the Helm download URL.
 
 ### C-16 `go.mod` is not tidy (Low)
+
+> Fixed in PR #51.
 
 **Where:** `go.mod` line 100; `api/v1alpha1/crd_printcolumns_test.go`.
 
