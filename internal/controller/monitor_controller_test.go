@@ -221,7 +221,7 @@ var _ = Describe("Monitor Controller", func() {
 				})
 		})
 
-		It("should handle secret reference without namespace", func() {
+		It("should resolve a Secret in the Monitor namespace", func() {
 			By("Creating a secret without validUntil label")
 			futureTime := time.Now().Add(20 * 24 * time.Hour)
 			secret := testutils.GenerateFullSecret(nsSecret, futureTime.Format("2006-01-02"), []byte("fake-token"))
@@ -812,7 +812,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 
-		It("should handle references without namespace", func() {
+		It("should map a Secret to a Monitor in the same namespace", func() {
 			nsSecret := h.NsName("mapping-secret", "default")
 			nsMonitor := h.NsName("mapping-monitor", "default")
 
