@@ -134,6 +134,8 @@ comparison, so the gap is covered by a test that asserts the wrong thing.
 
 ### C-03 Finalizer only protects in-memory metrics, blocks deletion (Medium)
 
+> Fixed in PR #52.
+
 **Where:** `monitor_controller.go` lines 107-111, 228-244;
 `config/rbac/role.yaml` (`monitors/finalizers`).
 
@@ -157,6 +159,8 @@ namespace. Keep one Monitor in the e2e suite that is deleted while the
 operator is scaled to zero, then confirm it disappears without help.
 
 ### C-04 Controller writes defaults into `spec` (Medium)
+
+> Fixed in PR #52.
 
 **Where:** `monitor_controller.go` lines 113-128, 312-336;
 `api/v1alpha1/monitor_types.go` lines 100-123.
@@ -191,6 +195,8 @@ resource at all.
 
 ### C-05 CRD lacks ordering and string validation (Medium)
 
+> Fixed in PR #52.
+
 **Where:** `monitor_types.go` lines 67-123;
 `config/crd/bases/expiring-secrets.stakater.com_monitors.yaml`.
 
@@ -222,6 +228,8 @@ the `api/v1alpha1` suite that creates an inverted-threshold Monitor against
 `envtest` and expects rejection.
 
 ### C-06 Status conditions go stale (Medium)
+
+> Fixed in PR #52.
 
 **Where:** `monitor_controller.go` lines 155-179, 181-216.
 
@@ -280,6 +288,8 @@ description, or parse as end of day (`23:59:59Z`). Either way, add a test
 that pins the chosen behaviour.
 
 ### C-09 Dead code and scaffolding left in the API package (Low)
+
+> Fixed in PR #52.
 
 **Where:** `monitor_types.go`.
 

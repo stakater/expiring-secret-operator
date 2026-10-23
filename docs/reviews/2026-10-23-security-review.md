@@ -321,6 +321,8 @@ Drop the `StrictHostKeyChecking no` line.
 
 ### S-09 RBAC wider than the code uses (Low)
 
+> Fixed in PR #52.
+
 **Where:** `config/rbac/role.yaml`, `config/rbac/leader_election_role.yaml`,
 `internal/controller/monitor_controller.go` lines 74-77 (RBAC markers).
 
