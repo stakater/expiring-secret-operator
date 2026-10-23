@@ -44,24 +44,56 @@ const (
 // setCondition sets or updates one status condition on m.
 func setCondition(m *expiringsecretv1alpha1.Monitor, t expiringsecretv1alpha1.MonitorConditionType, status metav1.ConditionStatus, reason, message string) {
 	apimeta.SetStatusCondition(&m.Status.Conditions, metav1.Condition{
-		Type:    string(t),
-		Status:  status,
-		Reason:  reason,
-		Message: message,
+		Type:               string(t),
+		Status:             status,
+		ObservedGeneration: m.Generation,
+		Reason:             reason,
+		Message:            message,
 	})
 }
 
-// setErrorConditions marks Ready False and, for user errors, the condition
-// that names what is wrong with the source Secret.
-func setErrorConditions(m *expiringsecretv1alpha1.Monitor, reason, message string) {
-	setCondition(m, expiringsecretv1alpha1.MonitorConditionReady, metav1.ConditionFalse, reason, message)
+// conditionSet holds the status of each condition a Monitor reports.
+type conditionSet struct {
+	Ready, SourceAvailable, SourceLabelFound, SourceLabelValid metav1.ConditionStatus
+}
+
+// conditionsFor maps a reason to the four condition statuses. A check that
+// never ran because an earlier one failed is Unknown.
+func conditionsFor(reason string) conditionSet {
+	const t, f, u = metav1.ConditionTrue, metav1.ConditionFalse, metav1.ConditionUnknown
 	switch reason {
+	case ReasonReady:
+		return conditionSet{t, t, t, t}
 	case ReasonSourceNotAvailable:
-		setCondition(m, expiringsecretv1alpha1.MonitorConditionSourceAvailable, metav1.ConditionFalse, reason, message)
+		return conditionSet{f, f, u, u}
 	case ReasonSourceLabelNotFound:
-		setCondition(m, expiringsecretv1alpha1.MonitorConditionSourceLabelFound, metav1.ConditionFalse, reason, message)
+		return conditionSet{f, t, f, u}
 	case ReasonSourceLabelInvalid:
-		setCondition(m, expiringsecretv1alpha1.MonitorConditionSourceLabelValid, metav1.ConditionFalse, reason, message)
+		return conditionSet{f, t, t, f}
+	default:
+		return conditionSet{f, u, u, u}
+	}
+}
+
+// applyConditions writes all four conditions for reason. A True condition
+// carries its own type as reason and a fixed message.
+func applyConditions(m *expiringsecretv1alpha1.Monitor, reason, message string) {
+	set := conditionsFor(reason)
+	for _, c := range []struct {
+		t       expiringsecretv1alpha1.MonitorConditionType
+		status  metav1.ConditionStatus
+		trueMsg string
+	}{
+		{expiringsecretv1alpha1.MonitorConditionReady, set.Ready, "Monitor is ready"},
+		{expiringsecretv1alpha1.MonitorConditionSourceAvailable, set.SourceAvailable, "Source Secret is available"},
+		{expiringsecretv1alpha1.MonitorConditionSourceLabelFound, set.SourceLabelFound, "Source label has been found"},
+		{expiringsecretv1alpha1.MonitorConditionSourceLabelValid, set.SourceLabelValid, "Source label is valid"},
+	} {
+		if c.status == metav1.ConditionTrue {
+			setCondition(m, c.t, c.status, string(c.t), c.trueMsg)
+		} else {
+			setCondition(m, c.t, c.status, reason, message)
+		}
 	}
 }
 

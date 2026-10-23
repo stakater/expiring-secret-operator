@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
@@ -103,5 +104,46 @@ var _ = Describe("Monitor status logic", func() {
 		}
 		setStatusMessage(monitor)
 		Expect(monitor.Status.Message).To(ContainSubstring("Unknown state"))
+	})
+	conditionStatus := func(m *expiringsecretv1alpha1.Monitor, t expiringsecretv1alpha1.MonitorConditionType) metav1.ConditionStatus {
+		c := apimeta.FindStatusCondition(m.Status.Conditions, string(t))
+		Expect(c).NotTo(BeNil(), string(t))
+		return c.Status
+	}
+
+	DescribeTable("conditions by reason",
+		func(reason string, want conditionSet) {
+			Expect(conditionsFor(reason)).To(Equal(want))
+			m := &expiringsecretv1alpha1.Monitor{}
+			applyConditions(m, reason, "msg")
+			Expect(conditionSet{
+				Ready:            conditionStatus(m, expiringsecretv1alpha1.MonitorConditionReady),
+				SourceAvailable:  conditionStatus(m, expiringsecretv1alpha1.MonitorConditionSourceAvailable),
+				SourceLabelFound: conditionStatus(m, expiringsecretv1alpha1.MonitorConditionSourceLabelFound),
+				SourceLabelValid: conditionStatus(m, expiringsecretv1alpha1.MonitorConditionSourceLabelValid),
+			}).To(Equal(want))
+		},
+		Entry("ready", ReasonReady, conditionSet{
+			metav1.ConditionTrue, metav1.ConditionTrue, metav1.ConditionTrue, metav1.ConditionTrue}),
+		Entry("source not available", ReasonSourceNotAvailable, conditionSet{
+			metav1.ConditionFalse, metav1.ConditionFalse, metav1.ConditionUnknown, metav1.ConditionUnknown}),
+		Entry("label not found", ReasonSourceLabelNotFound, conditionSet{
+			metav1.ConditionFalse, metav1.ConditionTrue, metav1.ConditionFalse, metav1.ConditionUnknown}),
+		Entry("label invalid", ReasonSourceLabelInvalid, conditionSet{
+			metav1.ConditionFalse, metav1.ConditionTrue, metav1.ConditionTrue, metav1.ConditionFalse}),
+		Entry("API error", ReasonAPIError, conditionSet{
+			metav1.ConditionFalse, metav1.ConditionUnknown, metav1.ConditionUnknown, metav1.ConditionUnknown}),
+	)
+
+	It("stamps the generation on every condition and replaces them in place", func() {
+		m := &expiringsecretv1alpha1.Monitor{ObjectMeta: metav1.ObjectMeta{Generation: 4}}
+		applyConditions(m, ReasonSourceNotAvailable, "gone")
+		applyConditions(m, ReasonReady, "Monitor is ready")
+
+		Expect(m.Status.Conditions).To(HaveLen(4))
+		for _, c := range m.Status.Conditions {
+			Expect(c.ObservedGeneration).To(Equal(int64(4)), c.Type)
+			Expect(c.Reason).To(Equal(c.Type))
+		}
 	})
 })

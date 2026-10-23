@@ -862,6 +862,24 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(errors.Is(err, patchErr)).To(BeTrue())
 		})
 
+		It("returns both errors when the Secret read and the status patch fail", func() {
+			monitor := testutils.GenerateMonitorService(
+				types.NamespacedName{Name: "double-error-monitor", Namespace: MonitorNamespace}, TargetSecretName, Service)
+			baseClient := fake.NewClientBuilder().WithScheme(scheme).
+				WithObjects(monitor).WithStatusSubresource(monitor).Build()
+			getErr, patchErr := errors.New("get failed"), errors.New("patch failed")
+			reconciler := &MonitorReconciler{
+				Client: &errorClient{Client: baseClient, getErr: getErr, statusPatchErr: patchErr},
+				Scheme: scheme,
+			}
+			DeferCleanup(utils.NewMetric(monitor).Cleanup)
+
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(monitor)})
+			Expect(result).To(Equal(ctrl.Result{}))
+			Expect(errors.Is(err, getErr)).To(BeTrue())
+			Expect(errors.Is(err, patchErr)).To(BeTrue())
+		})
+
 		It("should tolerate metrics update error in handleSuccess", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
@@ -1102,7 +1120,8 @@ var _ = Describe("Monitor Controller", func() {
 			result, err := r.handleError(newReconcileState(ctx, monitor), cause, reason, "msg")
 			if reason == ReasonAPIError {
 				Expect(result).To(Equal(ctrl.Result{}))
-				Expect(errors.Is(err, cause)).To(BeTrue())
+				Expect(err).To(HaveOccurred())
+				Expect(cause == nil || errors.Is(err, cause)).To(BeTrue())
 				return
 			}
 			Expect(err).NotTo(HaveOccurred())
@@ -1112,6 +1131,7 @@ var _ = Describe("Monitor Controller", func() {
 		Entry("label not found", ReasonSourceLabelNotFound, nil),
 		Entry("label invalid", ReasonSourceLabelInvalid, nil),
 		Entry("API error", ReasonAPIError, errors.New("boom")),
+		Entry("API error without a cause", ReasonAPIError, nil),
 	)
 
 	Context("When reconciling concurrently", func() {

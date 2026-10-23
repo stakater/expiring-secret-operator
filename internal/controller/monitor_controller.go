@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"time"
@@ -140,18 +141,7 @@ func (r *MonitorReconciler) handleSuccess(s *reconcileState) (ctrl.Result, error
 		// Don't fail reconciliation on metrics error, just log it
 	}
 
-	setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceAvailable,
-		"True",
-		"SourceAvailable",
-		"Source Secret is available")
-	setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceLabelFound,
-		"True",
-		"SourceLabelFound",
-		"Source label has been found")
-	setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionReady,
-		"True",
-		ReasonReady,
-		"Monitor is ready")
+	applyConditions(s.monitor, ReasonReady, "Monitor is ready")
 
 	return ctrl.Result{
 		// Requeue after 1 minute for continuous monitoring
@@ -184,11 +174,11 @@ func (r *MonitorReconciler) handleError(s *reconcileState, cause error, reason, 
 	if err := utils.NewMetric(s.monitor).WithLogger(s.log).SetError(); err != nil {
 		s.log.Error(err, "Failed to publish error state metric", "monitor", s.monitor.Name)
 	}
-	setErrorConditions(s.monitor, reason, message)
+	applyConditions(s.monitor, reason, message)
 
 	patchErr := r.Status().Patch(s.ctx, s.monitor, client.MergeFrom(s.original))
-	if reason == ReasonAPIError {
-		return ctrl.Result{}, errors.Join(cause, patchErr)
+	if reason == ReasonAPIError { // never (Result{}, nil): that would drop the retry
+		return ctrl.Result{}, errors.Join(cmp.Or(cause, errors.New(message)), patchErr)
 	}
 	return ctrl.Result{RequeueAfter: time.Minute}, patchErr
 }
