@@ -237,6 +237,8 @@ flowchart TD
     GET_SECRET -->|Not Found| ERROR_SECRET[Status: Error - Secret not found]
     ERROR_SECRET --> END_ERROR([Status: Error, re-check in 1 minute])
     
+    GET_SECRET -->|API error| ERROR_API([Status: Error, retry with back-off])
+    
     GET_SECRET -->|Found| CHECK_LABEL{Has validUntil label?}
     
     CHECK_LABEL -->|No| ERROR_LABEL[Status: Error - Missing label]
@@ -271,7 +273,7 @@ flowchart TD
     classDef successPath fill:#ccffcc
     classDef processPath fill:#cce5ff
     
-    class ERROR_SECRET,ERROR_LABEL,ERROR_PARSE,END_ERROR errorPath
+    class ERROR_SECRET,ERROR_LABEL,ERROR_PARSE,END_ERROR,ERROR_API errorPath
     class STATE_EXPIRED,STATE_CRITICAL,STATE_WARNING,STATE_INFO,STATE_VALID,END_SUCCESS successPath
     class CALC_REMAINING,UPDATE_METRICS,UPDATE_STATUS,REQUEUE processPath
 ```
