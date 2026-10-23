@@ -30,6 +30,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -286,7 +287,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 		})
 	})
 
-	Context("Monitor Resource Functionality Cross-Namespace", func() {
+	Context("Monitor cannot see Secrets in other namespaces", func() {
 		monitorNamespace := "e2e-test"
 		secretNamespace := "secret-ns"
 
@@ -324,36 +325,33 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			_ = k8sClient.Delete(ctx, monitorNS)
 		})
 
-		It("should handle cross-namespace secret references", func() {
+		It("should report SourceNotAvailable for a Secret in another namespace", func() {
 			nsSecret := h.NsName("cross-ns-secret", secretNamespace)
 			nsMonitor := h.NsName("test-monitor-cross-ns", monitorNamespace)
 
-			By("creating secret in different namespace")
+			By("creating secret in a different namespace")
 			futureDate := time.Now().Add(25 * 24 * time.Hour).Format("2006-01-02")
 			secret := utils.GenerateFullSecret(nsSecret, futureDate, []byte("cross-namespace-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-			By("creating monitor that references cross-namespace secret")
+			By("creating monitor that names the same Secret in its own namespace")
 			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
-			By("waiting for monitor to process cross-namespace secret")
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, nsMonitor, monitor)
-				if err != nil {
-					return false
+			By("waiting for the monitor to report an error")
+			Eventually(func() expiringsecretv1alpha1.MonitorState {
+				if err := k8sClient.Get(ctx, nsMonitor, monitor); err != nil {
+					return ""
 				}
-				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateInfo &&
-					monitor.Status.ExpiresAt != nil
-			}, timeout, interval).Should(BeTrue())
+				return monitor.Status.State
+			}, timeout, interval).Should(Equal(expiringsecretv1alpha1.MonitorStateError))
 
-			err := k8sClient.Get(ctx, nsMonitor, monitor)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(string(monitor.Status.State)).To(Equal(string(expiringsecretv1alpha1.MonitorStateInfo)))
-			Expect(monitor.Status.Message).To(
-				Equal(fmt.Sprintf("Secret expires in less than %d days", monitor.Spec.AlertThresholds.InfoDays)))
-			Expect(*monitor.Status.SecondsRemaining).To(BeNumerically(">", 0))
+			Expect(monitor.Status.ExpiresAt).To(BeNil())
+			cond := apimeta.FindStatusCondition(monitor.Status.Conditions,
+				string(expiringsecretv1alpha1.MonitorConditionSourceAvailable))
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal("SourceNotAvailable"))
 		})
 	})
 
