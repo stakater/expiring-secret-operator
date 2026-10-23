@@ -147,7 +147,6 @@ func (r *MonitorReconciler) observeSource(s *reconcileState) (ctrl.Result, error
 	calculateState(s.monitor, validUntil, time.Now())
 	setStatusMessage(s.monitor)
 	s.monitor.Status.ObservedGeneration = s.monitor.Generation
-	s.monitor.Status.LastSourceResourceVersion = sourceObj.GetResourceVersion()
 	return r.handleSuccess(s)
 }
 
