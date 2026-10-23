@@ -18,9 +18,11 @@ package controller
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -69,6 +71,15 @@ var _ = Describe("parseValidUntil", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Reason).To(Equal("SourceLabelInvalid"))
 		Expect(expiresAt).To(Equal(time.Time{}))
+	})
+
+	It("never logs the Secret's label map", func() {
+		var lines []string
+		log := funcr.New(func(_, args string) { lines = append(lines, args) }, funcr.Options{Verbosity: 2})
+		secret := &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "s", Labels: map[string]string{"team": "x"}}}
+		_, _ = parseValidUntil(log, secret)
+		Expect(strings.Join(lines, "\n")).NotTo(ContainSubstring("team"))
+		Expect(strings.Join(lines, "\n")).To(ContainSubstring("labelPresent"))
 	})
 })
 

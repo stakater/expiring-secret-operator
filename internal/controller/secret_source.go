@@ -79,7 +79,7 @@ func parseValidUntil(log logr.Logger, sourceObj client.Object) (time.Time, *Moni
 		log.Error(nil, msg,
 			"name", sourceObj.GetName(),
 			"namespace", sourceObj.GetNamespace(),
-			"availableLabels", labels,
+			"labelPresent", exists,
 			"expectedLabel", LabelKey,
 		)
 		return validUntil, &MonitorErrorReasonMessage{

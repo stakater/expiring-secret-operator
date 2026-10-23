@@ -77,7 +77,7 @@ func (e *MonitorErrorReasonMessage) Error() string { return e.Message }
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log.FromContext(ctx).Info("Reconciling Monitor", "namespace", req.Namespace, "name", req.Name)
+	log.FromContext(ctx).V(1).Info("Reconciling Monitor", "namespace", req.Namespace, "name", req.Name)
 
 	monitor := &expiringsecretv1alpha1.Monitor{}
 	if err := r.Get(ctx, req.NamespacedName, monitor); err != nil {
@@ -166,7 +166,7 @@ func (r *MonitorReconciler) handleError(s *reconcileState, cause error, reason, 
 	}
 	s.monitor.Status.State = expiringsecretv1alpha1.MonitorStateError
 	s.monitor.Status.Message = message
-	s.log.Info("Handling Monitor error", "reason", reason, "message", message)
+	s.log.V(1).Info("Handling Monitor error", "reason", reason, "message", message)
 
 	// Drop the value gauges, whose expiry is unknown, but keep publishing the
 	// state so a failing Monitor stays alertable rather than going silent.
