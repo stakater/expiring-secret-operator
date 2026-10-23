@@ -1,0 +1,139 @@
+/*
+Copyright 2026 Stakater.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"fmt"
+	"time"
+
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
+)
+
+const (
+	secretIsValid   = "Secret is valid until %s"
+	secretExpiresIn = "Secret expires in less than %d days"
+	secretExpiredOn = "Secret expired on %s"
+)
+
+// setCondition sets or updates one status condition on m.
+func setCondition(m *expiringsecretv1alpha1.Monitor, t expiringsecretv1alpha1.MonitorConditionType, status metav1.ConditionStatus, reason, message string) {
+	apimeta.SetStatusCondition(&m.Status.Conditions, metav1.Condition{
+		Type:    string(t),
+		Status:  status,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyDefaultAlertThresholds sets default values for alert thresholds if they
+// are not provided
+func applyDefaultAlertThresholds(m *expiringsecretv1alpha1.Monitor) bool {
+	if m.Spec.AlertThresholds == nil {
+		m.Spec.AlertThresholds = &expiringsecretv1alpha1.AlertThresholds{
+			InfoDays:     30,
+			WarningDays:  14,
+			CriticalDays: 7,
+		}
+		return true
+	} else {
+		changed := false
+		if m.Spec.AlertThresholds.InfoDays == 0 {
+			m.Spec.AlertThresholds.InfoDays = 30
+			changed = true
+		}
+		if m.Spec.AlertThresholds.WarningDays == 0 {
+			m.Spec.AlertThresholds.WarningDays = 14
+			changed = true
+		}
+		if m.Spec.AlertThresholds.CriticalDays == 0 {
+			m.Spec.AlertThresholds.CriticalDays = 7
+			changed = true
+		}
+		return changed
+	}
+}
+
+// calculateState determines the current state based on alert thresholds
+func calculateState(m *expiringsecretv1alpha1.Monitor, validUntil, now time.Time) {
+	// Update the Monitor status
+	lastchecked := metav1.NewTime(now)
+	secondsRemaining := validUntil.Sub(now).Seconds()
+	expiresAt := metav1.NewTime(validUntil)
+	secondsRemainingInt := int64(secondsRemaining)
+
+	// Update status fields
+	m.Status.LastChecked = &lastchecked
+	m.Status.ExpiresAt = &expiresAt
+	m.Status.SecondsRemaining = &secondsRemainingInt
+
+	if secondsRemaining <= 0 {
+		m.Status.State = expiringsecretv1alpha1.MonitorStateExpired
+		return
+	}
+
+	m.Status.State = expiringsecretv1alpha1.MonitorStateValid
+
+	daysRemaining := secondsRemaining / (24 * 60 * 60)
+
+	if daysRemaining <= float64(m.Spec.AlertThresholds.CriticalDays) {
+		m.Status.State = expiringsecretv1alpha1.MonitorStateCritical
+	} else if daysRemaining <= float64(m.Spec.AlertThresholds.WarningDays) {
+		m.Status.State = expiringsecretv1alpha1.MonitorStateWarning
+	} else if daysRemaining <= float64(m.Spec.AlertThresholds.InfoDays) {
+		m.Status.State = expiringsecretv1alpha1.MonitorStateInfo
+	}
+}
+
+// setStatusMessage creates a user-friendly message based on the current
+// state and thresholds
+func setStatusMessage(m *expiringsecretv1alpha1.Monitor) {
+	if m.Status.ExpiresAt == nil {
+		m.Status.Message = "Expiration date is not available"
+		return
+	}
+	if m.Status.SecondsRemaining == nil {
+		m.Status.Message = "Seconds until expiration is not available"
+		return
+	}
+	message := ""
+	switch m.Status.State {
+	case expiringsecretv1alpha1.MonitorStateValid:
+		message = fmt.Sprintf(secretIsValid,
+			m.Status.ExpiresAt.Format("2006-01-02"))
+	case expiringsecretv1alpha1.MonitorStateInfo:
+		message = fmt.Sprintf(secretExpiresIn,
+			m.Spec.AlertThresholds.InfoDays)
+	case expiringsecretv1alpha1.MonitorStateWarning:
+		message = fmt.Sprintf(secretExpiresIn,
+			m.Spec.AlertThresholds.WarningDays)
+	case expiringsecretv1alpha1.MonitorStateCritical:
+		message = fmt.Sprintf(secretExpiresIn,
+			m.Spec.AlertThresholds.CriticalDays)
+	case expiringsecretv1alpha1.MonitorStateExpired:
+		message = fmt.Sprintf(secretExpiredOn,
+			m.Status.ExpiresAt.Format("2006-01-02"))
+	case expiringsecretv1alpha1.MonitorStateError:
+		message = "Error monitoring secret"
+	default:
+		message = fmt.Sprintf("Unknown state: %s", m.Status.State)
+	}
+
+	m.Status.Message = message
+}

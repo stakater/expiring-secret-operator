@@ -25,8 +25,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -58,9 +56,6 @@ type MonitorReconciler struct {
 const (
 	monitorFinalizer        = "expiring-secrets.stakater.com/monitor-finalizer"
 	LabelKey                = "expiring-secrets.stakater.com/validUntil"
-	secretIsValid           = "Secret is valid until %s"
-	secretExpiresIn         = "Secret expires in less than %d days"
-	secretExpiredOn         = "Secret expired on %s"
 	sourceLabelNotAvailable = "sourceLabelNotAvailable"
 )
 
@@ -110,7 +105,7 @@ func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		needsUpdate = true
 	}
 
-	if r.applyDefaultAlertThresholds() {
+	if applyDefaultAlertThresholds(r.output) {
 		r.log.Info("Applying default alert thresholds to Monitor", "namespace", req.Namespace, "name", req.Name)
 		needsUpdate = true
 	}
@@ -141,10 +136,10 @@ func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Determine the current state based on thresholds
-	r.calculateState(validUntil)
+	calculateState(r.output, validUntil, time.Now())
 
 	// Generate a user-friendly status message
-	r.generateStatusMessage()
+	setStatusMessage(r.output)
 
 	r.output.Status.ObservedGeneration = r.output.Generation
 	r.output.Status.LastSourceResourceVersion = sourceObj.GetResourceVersion()
@@ -159,15 +154,15 @@ func (r *MonitorReconciler) handleSuccess() (ctrl.Result, error) {
 		// Don't fail reconciliation on metrics error, just log it
 	}
 
-	r.updateCondition(expiringsecretv1alpha1.MonitorConditionSourceAvailable,
+	setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceAvailable,
 		"True",
 		"SourceAvailable",
 		"Source Secret is available")
-	r.updateCondition(expiringsecretv1alpha1.MonitorConditionSourceLabelFound,
+	setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceLabelFound,
 		"True",
 		"SourceLabelFound",
 		"Source label has been found")
-	r.updateCondition(expiringsecretv1alpha1.MonitorConditionReady,
+	setCondition(r.output, expiringsecretv1alpha1.MonitorConditionReady,
 		"True",
 		"Ready",
 		"Monitor is ready")
@@ -195,11 +190,11 @@ func (r *MonitorReconciler) handleError(err error, reason string, message string
 	}
 
 	// Always set Ready condition to False on error
-	r.updateCondition(expiringsecretv1alpha1.MonitorConditionReady, "False", reason, detailedMessage)
+	setCondition(r.output, expiringsecretv1alpha1.MonitorConditionReady, "False", reason, detailedMessage)
 
 	// Make sure SourceAvailable and ServiceAccountSynced are marked False when we fail
 	if reason == "SourceNotAvailable" || reason == "SourceDataInvalid" {
-		r.updateCondition(expiringsecretv1alpha1.MonitorConditionSourceAvailable, "False", reason, detailedMessage)
+		setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceAvailable, "False", reason, detailedMessage)
 	}
 
 	// sourceLabelNotAvailable indicates that the expected label is missing,
@@ -207,22 +202,13 @@ func (r *MonitorReconciler) handleError(err error, reason string, message string
 	// expected format.
 	// Both conditions should be set accordingly based on the error reason.
 	if reason == sourceLabelNotAvailable {
-		r.updateCondition(expiringsecretv1alpha1.MonitorConditionSourceLabelFound, "False", reason, detailedMessage)
+		setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceLabelFound, "False", reason, detailedMessage)
 	}
 	if reason == "SourceLabelInvalid" {
-		r.updateCondition(expiringsecretv1alpha1.MonitorConditionSourceLabelValid, "False", reason, detailedMessage)
+		setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceLabelValid, "False", reason, detailedMessage)
 	}
 
 	return ctrl.Result{}, r.Status().Patch(r.ctx, r.output, client.MergeFrom(r.original))
-}
-
-func (r *MonitorReconciler) updateCondition(conditionType expiringsecretv1alpha1.MonitorConditionType, status, reason, message string) {
-	apimeta.SetStatusCondition(&r.output.Status.Conditions, metav1.Condition{
-		Type:    string(conditionType),
-		Status:  metav1.ConditionStatus(status),
-		Reason:  reason,
-		Message: message,
-	})
 }
 
 func (r *MonitorReconciler) handleDeletion() (ctrl.Result, error) {
@@ -305,103 +291,6 @@ func (r *MonitorReconciler) parseSourceObject(sourceObj client.Object) (time.Tim
 	}
 
 	return validUntil, nil
-}
-
-// applyDefaultAlertThresholds sets default values for alert thresholds if they
-// are not provided
-func (r *MonitorReconciler) applyDefaultAlertThresholds() bool {
-	if r.output.Spec.AlertThresholds == nil {
-		r.output.Spec.AlertThresholds = &expiringsecretv1alpha1.AlertThresholds{
-			InfoDays:     30,
-			WarningDays:  14,
-			CriticalDays: 7,
-		}
-		return true
-	} else {
-		changed := false
-		if r.output.Spec.AlertThresholds.InfoDays == 0 {
-			r.output.Spec.AlertThresholds.InfoDays = 30
-			changed = true
-		}
-		if r.output.Spec.AlertThresholds.WarningDays == 0 {
-			r.output.Spec.AlertThresholds.WarningDays = 14
-			changed = true
-		}
-		if r.output.Spec.AlertThresholds.CriticalDays == 0 {
-			r.output.Spec.AlertThresholds.CriticalDays = 7
-			changed = true
-		}
-		return changed
-	}
-}
-
-// calculateState determines the current state based on alert thresholds
-func (r *MonitorReconciler) calculateState(validUntil time.Time) {
-	now := time.Now()
-	// Update the Monitor status
-	lastchecked := metav1.NewTime(now)
-	secondsRemaining := validUntil.Sub(now).Seconds()
-	expiresAt := metav1.NewTime(validUntil)
-	secondsRemainingInt := int64(secondsRemaining)
-
-	// Update status fields
-	r.output.Status.LastChecked = &lastchecked
-	r.output.Status.ExpiresAt = &expiresAt
-	r.output.Status.SecondsRemaining = &secondsRemainingInt
-
-	if secondsRemaining <= 0 {
-		r.output.Status.State = expiringsecretv1alpha1.MonitorStateExpired
-		return
-	}
-
-	r.output.Status.State = expiringsecretv1alpha1.MonitorStateValid
-
-	daysRemaining := secondsRemaining / (24 * 60 * 60)
-
-	if daysRemaining <= float64(r.output.Spec.AlertThresholds.CriticalDays) {
-		r.output.Status.State = expiringsecretv1alpha1.MonitorStateCritical
-	} else if daysRemaining <= float64(r.output.Spec.AlertThresholds.WarningDays) {
-		r.output.Status.State = expiringsecretv1alpha1.MonitorStateWarning
-	} else if daysRemaining <= float64(r.output.Spec.AlertThresholds.InfoDays) {
-		r.output.Status.State = expiringsecretv1alpha1.MonitorStateInfo
-	}
-}
-
-// generateStatusMessage creates a user-friendly message based on the current
-// state and thresholds
-func (r *MonitorReconciler) generateStatusMessage() {
-	if r.output.Status.ExpiresAt == nil {
-		r.output.Status.Message = "Expiration date is not available"
-		return
-	}
-	if r.output.Status.SecondsRemaining == nil {
-		r.output.Status.Message = "Seconds until expiration is not available"
-		return
-	}
-	message := ""
-	switch r.output.Status.State {
-	case expiringsecretv1alpha1.MonitorStateValid:
-		message = fmt.Sprintf(secretIsValid,
-			r.output.Status.ExpiresAt.Format("2006-01-02"))
-	case expiringsecretv1alpha1.MonitorStateInfo:
-		message = fmt.Sprintf(secretExpiresIn,
-			r.output.Spec.AlertThresholds.InfoDays)
-	case expiringsecretv1alpha1.MonitorStateWarning:
-		message = fmt.Sprintf(secretExpiresIn,
-			r.output.Spec.AlertThresholds.WarningDays)
-	case expiringsecretv1alpha1.MonitorStateCritical:
-		message = fmt.Sprintf(secretExpiresIn,
-			r.output.Spec.AlertThresholds.CriticalDays)
-	case expiringsecretv1alpha1.MonitorStateExpired:
-		message = fmt.Sprintf(secretExpiredOn,
-			r.output.Status.ExpiresAt.Format("2006-01-02"))
-	case expiringsecretv1alpha1.MonitorStateError:
-		message = "Error monitoring secret"
-	default:
-		message = fmt.Sprintf("Unknown state: %s", r.output.Status.State)
-	}
-
-	r.output.Status.Message = message
 }
 
 // mapSecretToMonitor maps a Secret to Monitor objects that reference it

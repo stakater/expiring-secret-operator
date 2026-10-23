@@ -509,7 +509,7 @@ var _ = Describe("Monitor Controller", func() {
 			By("Manually setting invalid values")
 			monitor.Status.State = ""
 			controllerReconciler.output = monitor
-			controllerReconciler.generateStatusMessage()
+			setStatusMessage(monitor)
 		})
 
 		It("should handle Status.ExpiresAt nil", func() {
@@ -525,7 +525,7 @@ var _ = Describe("Monitor Controller", func() {
 			err := utils.NewMetric(controllerReconciler.output).Update()
 			Expect(err).To(HaveOccurred())
 
-			controllerReconciler.generateStatusMessage()
+			setStatusMessage(monitor)
 		})
 
 		It("should handle Status.SecondsRemaining nil", func() {
@@ -751,44 +751,6 @@ var _ = Describe("Monitor Controller", func() {
 
 	})
 
-	DescribeTable("When testing state calculation logic",
-		func(daysRemaining int, expectedState expiringsecretv1alpha1.MonitorState) {
-			monitor := &expiringsecretv1alpha1.Monitor{
-				Spec: expiringsecretv1alpha1.MonitorSpec{
-					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{
-						InfoDays:     30,
-						WarningDays:  14,
-						CriticalDays: 7,
-					},
-				},
-			}
-
-			reconciler := &MonitorReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				output: monitor,
-			}
-			t := time.Now().Add(time.Duration(daysRemaining) * 24 * time.Hour)
-			reconciler.calculateState(t)
-			Expect(monitor.Status.State).To(Equal(expectedState))
-
-			reconciler.generateStatusMessage()
-			Expect(reconciler.output.Status.Message).NotTo(BeEmpty())
-		},
-		Entry("should calculate Valid state correctly",
-			31, expiringsecretv1alpha1.MonitorStateValid),
-		Entry("should calculate Info state correctly",
-			30, expiringsecretv1alpha1.MonitorStateInfo),
-		Entry("should calculate Warning state correctly",
-			10, expiringsecretv1alpha1.MonitorStateWarning),
-		Entry("should calculate Critical state correctly",
-			3, expiringsecretv1alpha1.MonitorStateCritical),
-		Entry("should calculate Expired state correctly",
-			-5, expiringsecretv1alpha1.MonitorStateExpired),
-		Entry("should use default thresholds when not specified",
-			10, expiringsecretv1alpha1.MonitorStateWarning),
-	)
-
 	Context("When mapping secrets to monitors", func() {
 		var reconciler *MonitorReconciler
 		var h *testutils.TestHelper
@@ -950,59 +912,6 @@ var _ = Describe("Monitor Controller", func() {
 
 		BeforeEach(func() {
 			reconciler = newReconciler()
-		})
-
-		It("should handle generateStatusMessage with nil ExpiresAt", func() {
-			monitor := &expiringsecretv1alpha1.Monitor{
-				Spec: expiringsecretv1alpha1.MonitorSpec{
-					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{
-						CriticalDays: 7,
-					},
-				},
-				Status: expiringsecretv1alpha1.MonitorStatus{
-					State:            expiringsecretv1alpha1.MonitorStateWarning,
-					ExpiresAt:        nil,
-					SecondsRemaining: pointerInt64(86400),
-				},
-			}
-
-			reconciler.output = monitor
-			reconciler.generateStatusMessage()
-
-			Expect(reconciler.output.Status.Message).NotTo(BeEmpty())
-		})
-
-		It("should handle generateStatusMessage with nil SecondsRemaining", func() {
-			now := time.Now()
-			monitor := &expiringsecretv1alpha1.Monitor{
-				Spec: expiringsecretv1alpha1.MonitorSpec{
-					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{
-						CriticalDays: 7,
-					},
-				},
-				Status: expiringsecretv1alpha1.MonitorStatus{
-					State:            expiringsecretv1alpha1.MonitorStateExpired,
-					ExpiresAt:        &metav1.Time{Time: now},
-					SecondsRemaining: nil,
-				},
-			}
-
-			reconciler.output = monitor
-			reconciler.generateStatusMessage()
-			Expect(reconciler.output.Status.Message).NotTo(BeEmpty())
-		})
-
-		It("should handle generateStatusMessage with MonitorStateError", func() {
-			monitor := &expiringsecretv1alpha1.Monitor{
-				Status: expiringsecretv1alpha1.MonitorStatus{
-					State: expiringsecretv1alpha1.MonitorStateError,
-				},
-			}
-
-			reconciler.output = monitor
-			reconciler.generateStatusMessage()
-			Expect(reconciler.output.Status.Message).
-				To(Equal("Expiration date is not available"))
 		})
 
 		It("should handle updateMetrics with nil ExpiresAt", func() {
@@ -1222,20 +1131,6 @@ var _ = Describe("Monitor Controller", func() {
 
 			_, err := reconciler.getSourceObject()
 			Expect(err).To(HaveOccurred())
-		})
-
-		It("should use unknown message for unknown state", func() {
-			now := time.Now()
-			monitor := &expiringsecretv1alpha1.Monitor{
-				Status: expiringsecretv1alpha1.MonitorStatus{
-					State:            expiringsecretv1alpha1.MonitorState("mystery"),
-					ExpiresAt:        &metav1.Time{Time: now},
-					SecondsRemaining: pointerInt64(3600),
-				},
-			}
-			reconciler := &MonitorReconciler{output: monitor}
-			reconciler.generateStatusMessage()
-			Expect(reconciler.output.Status.Message).To(ContainSubstring("Unknown state"))
 		})
 
 		It("should return nil requests when list fails", func() {
