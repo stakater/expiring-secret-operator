@@ -32,13 +32,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	rest "k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -105,8 +105,10 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(clientgoscheme.AddToScheme(scheme)).NotTo(HaveOccurred())
 			Expect(expiringsecretv1alpha1.AddToScheme(scheme)).NotTo(HaveOccurred())
 
-			mgr, err := ctrl.NewManager(&rest.Config{}, ctrl.Options{
-				Scheme: scheme,
+			mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+				Scheme:                 scheme,
+				Metrics:                metricsserver.Options{BindAddress: "0"},
+				HealthProbeBindAddress: "0",
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -771,111 +773,6 @@ var _ = Describe("Monitor Controller", func() {
 
 	})
 
-	Context("When mapping secrets to monitors", func() {
-		var reconciler *MonitorReconciler
-		var h *testutils.TestHelper
-
-		BeforeEach(func() {
-			h = testutils.NewHelper(ctx, k8sClient)
-			reconciler = newReconciler()
-		})
-
-		It("should map correctly", func() {
-			nsSecret1 := h.NsName("mapping-secret", "default")
-			nsSecret2 := h.NsName("other-secret", "default")
-			nsMonitor1 := h.NsName("mapping-monitor-1", "default")
-			nsMonitor2 := h.NsName("mapping-monitor-2", "default")
-
-			ctx := context.Background()
-
-			By("Creating test resources for mapping")
-			secret := testutils.GenerateFullSecret(nsSecret1, "", []byte("test-token"))
-
-			monitor1 := testutils.GenerateMonitorService(nsMonitor1, nsSecret1.Name, "docker.io")
-			monitor2 := testutils.GenerateMonitorService(nsMonitor2, nsSecret2.Name, "docker.io")
-
-			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-			Expect(k8sClient.Create(ctx, monitor1)).To(Succeed())
-			Expect(k8sClient.Create(ctx, monitor2)).To(Succeed())
-
-			By("Testing the mapping function")
-			requests := reconciler.mapSecretToMonitor(ctx, secret)
-
-			By("Expecting one request for monitor1 only")
-			Expect(requests).To(HaveLen(1))
-			Expect(requests[0].Name).To(Equal("mapping-monitor-1"))
-			Expect(requests[0].Namespace).To(Equal("default"))
-
-			By("Cleanup test resources")
-			Expect(k8sClient.Delete(ctx, monitor2)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, monitor1)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
-		})
-
-		It("should map a Secret to a Monitor in the same namespace", func() {
-			nsSecret := h.NsName("mapping-secret", "default")
-			nsMonitor := h.NsName("mapping-monitor", "default")
-
-			ctx := context.Background()
-
-			secret := testutils.GenerateFullSecret(nsSecret, "", []byte("test-token"))
-			monitor := testutils.GenerateMonitor(nsMonitor, nsSecret.Name)
-
-			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
-
-			By("Testing reference mapping")
-			requests := reconciler.mapSecretToMonitor(ctx, secret)
-
-			By("Expecting one request for monitor")
-			Expect(requests).To(HaveLen(1))
-			Expect(requests[0].Name).To(Equal(nsMonitor.Name))
-			Expect(requests[0].Namespace).To(Equal(nsMonitor.Namespace))
-
-			By("Cleanup test resources")
-			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
-		})
-
-		It("should return no requests when no monitors match", func() {
-			nsSecret := h.NsName("no-match-secret", "default")
-			nsOtherSecret := h.NsName("other-secret-no-match", "default")
-			nsMonitor := h.NsName("no-match-monitor", "default")
-
-			ctx := context.Background()
-
-			By("Creating a secret and a monitor that references a different secret")
-			secret := testutils.GenerateFullSecret(nsSecret, "", []byte("test-token"))
-			monitor := testutils.GenerateMonitor(nsMonitor, nsOtherSecret.Name)
-
-			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
-
-			By("Testing the mapping function")
-			requests := reconciler.mapSecretToMonitor(ctx, secret)
-
-			By("Expecting no requests")
-			Expect(requests).To(BeEmpty())
-
-			By("Cleanup test resources")
-			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
-		})
-
-		It("should return nil when context is cancelled", func() {
-			By("Testing with a TODO context")
-			ct := context.TODO()
-			ct.Done() // Cancel the context to simulate an invalid context
-
-			By("Testing the mapping function")
-			requests := reconciler.mapSecretToMonitor(ct, &corev1.Secret{})
-			testutils.Log("Received requests with cancelled context: %+v", requests)
-
-			By("Expecting nil requests due to cancelled context")
-			Expect(requests).To(BeNil())
-		})
-	})
-
 	Context("When testing controller setup", func() {
 		It("should setup controller with manager successfully", func() {
 			By("Creating a mock manager")
@@ -1064,41 +961,6 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
-		It("should return nil requests when list fails", func() {
-			baseClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-			reconciler := &MonitorReconciler{
-				Client: &errorClient{
-					Client:  baseClient,
-					listErr: errors.New("list failed"),
-				},
-				Scheme: scheme,
-			}
-
-			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "secret", Namespace: MonitorNamespace}}
-			requests := reconciler.mapSecretToMonitor(ctx, secret)
-			Expect(requests).To(BeNil())
-		})
-
-		It("should only map a Secret to Monitors in its own namespace", func() {
-			monitor := &expiringsecretv1alpha1.Monitor{
-				ObjectMeta: metav1.ObjectMeta{Name: "m", Namespace: "a"},
-				Spec: expiringsecretv1alpha1.MonitorSpec{
-					SecretRef: &expiringsecretv1alpha1.SecretReference{Name: "s"},
-					Service:   Service,
-				},
-			}
-			baseClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(monitor).Build()
-			reconciler := &MonitorReconciler{Client: baseClient, Scheme: scheme}
-
-			secretInB := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "b"}}
-			Expect(reconciler.mapSecretToMonitor(ctx, secretInB)).To(BeEmpty())
-
-			secretInA := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "a"}}
-			Expect(reconciler.mapSecretToMonitor(ctx, secretInA)).To(Equal([]ctrl.Request{
-				{NamespacedName: types.NamespacedName{Name: "m", Namespace: "a"}},
-			}))
-		})
-
 		It("should tolerate metrics update error in handleSuccess", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				TypeMeta: metav1.TypeMeta{
@@ -1273,7 +1135,8 @@ var _ = Describe("Monitor Controller", func() {
 				},
 			}
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret, monitor).
-				WithStatusSubresource(&expiringsecretv1alpha1.Monitor{}).Build()
+				WithStatusSubresource(&expiringsecretv1alpha1.Monitor{}).
+				WithIndex(&expiringsecretv1alpha1.Monitor{}, secretRefNameIndex, indexMonitorBySecretName).Build()
 			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: monitor.Name, Namespace: monitor.Namespace}}
 
 			r := &MonitorReconciler{Client: c, Scheme: scheme}

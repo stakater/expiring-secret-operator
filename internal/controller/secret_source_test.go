@@ -26,8 +26,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
+	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
 	testutils "github.com/stakater/expiring-secret-operator/test/utils"
 )
 
@@ -104,3 +107,48 @@ var _ = Describe("getSourceObject", func() {
 		Expect(errors.Is(err, errSecretNotFound)).To(BeTrue())
 	})
 })
+
+// monitorInA builds a Monitor in namespace "a" referencing secretName.
+func monitorInA(name, secretName string) client.Object {
+	return testutils.GenerateMonitor(types.NamespacedName{Name: name, Namespace: "a"}, secretName)
+}
+
+var _ = DescribeTable("mapSecretToMonitor",
+	func(monitors []client.Object, secret types.NamespacedName, listErr error, want []types.NamespacedName) {
+		c := fake.NewClientBuilder().WithScheme(k8sClient.Scheme()).WithObjects(monitors...).
+			WithIndex(&expiringsecretv1alpha1.Monitor{}, secretRefNameIndex, indexMonitorBySecretName).Build()
+		r := &MonitorReconciler{Client: &errorClient{Client: c, listErr: listErr}, Scheme: c.Scheme()}
+		obj := &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: secret.Name, Namespace: secret.Namespace}}
+
+		requests := r.mapSecretToMonitor(ctx, obj)
+		if want == nil { // nil marks the error case: no requests at all
+			Expect(requests).To(BeNil())
+			return
+		}
+		var got []types.NamespacedName
+		for _, req := range requests {
+			got = append(got, req.NamespacedName)
+		}
+		Expect(got).To(ConsistOf(want))
+	},
+	Entry("one match",
+		[]client.Object{monitorInA("m1", "s"), monitorInA("m2", "other")},
+		types.NamespacedName{Namespace: "a", Name: "s"}, nil,
+		[]types.NamespacedName{{Namespace: "a", Name: "m1"}}),
+	Entry("no match on name",
+		[]client.Object{monitorInA("m1", "other")},
+		types.NamespacedName{Namespace: "a", Name: "s"}, nil,
+		[]types.NamespacedName{}),
+	Entry("same name in another namespace",
+		[]client.Object{monitorInA("m1", "s")},
+		types.NamespacedName{Namespace: "b", Name: "s"}, nil,
+		[]types.NamespacedName{}),
+	Entry("two Monitors on one Secret",
+		[]client.Object{monitorInA("m1", "s"), monitorInA("m2", "s")},
+		types.NamespacedName{Namespace: "a", Name: "s"}, nil,
+		[]types.NamespacedName{{Namespace: "a", Name: "m1"}, {Namespace: "a", Name: "m2"}}),
+	Entry("list error",
+		[]client.Object{monitorInA("m1", "s")},
+		types.NamespacedName{Namespace: "a", Name: "s"}, errors.New("list failed"),
+		nil),
+)

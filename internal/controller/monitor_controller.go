@@ -236,6 +236,11 @@ func (r *MonitorReconciler) handleDeletion(s *reconcileState) (ctrl.Result, erro
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	err := mgr.GetFieldIndexer().IndexField(context.Background(),
+		&expiringsecretv1alpha1.Monitor{}, secretRefNameIndex, indexMonitorBySecretName)
+	if err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&expiringsecretv1alpha1.Monitor{}, builder.WithPredicates(predicate.Funcs{
 			CreateFunc: monitorCreatePredicate,
@@ -250,6 +255,7 @@ func (r *MonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				UpdateFunc: secretUpdatePredicate,
 				DeleteFunc: secretDeletePredicate,
 			}),
+			builder.OnlyMetadata,
 		).
 		Named("monitor").
 		Complete(r)

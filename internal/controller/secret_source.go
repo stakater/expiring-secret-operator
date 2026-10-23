@@ -101,30 +101,33 @@ func parseValidUntil(log logr.Logger, sourceObj client.Object) (time.Time, *Moni
 	return validUntil, nil
 }
 
-// mapSecretToMonitor maps a Secret to Monitor objects that reference it
-func (r *MonitorReconciler) mapSecretToMonitor(ctx context.Context, obj client.Object) []ctrl.Request {
-	logger := log.FromContext(ctx)
-	secret := obj.(*corev1.Secret)
+// secretRefNameIndex indexes Monitors by the name of the Secret they reference.
+const secretRefNameIndex = "spec.secretRef.name"
 
-	// Find all monitors that reference this secret
+// indexMonitorBySecretName extracts the secretRefNameIndex value of a Monitor.
+func indexMonitorBySecretName(o client.Object) []string {
+	monitor, ok := o.(*expiringsecretv1alpha1.Monitor)
+	if !ok || monitor.Spec.SecretRef == nil {
+		return nil
+	}
+	return []string{monitor.Spec.SecretRef.Name}
+}
+
+// mapSecretToMonitor maps a Secret to the Monitors in its namespace that reference it.
+func (r *MonitorReconciler) mapSecretToMonitor(ctx context.Context, obj client.Object) []ctrl.Request {
 	monitorList := &expiringsecretv1alpha1.MonitorList{}
-	logger.Info("Mapping Secret to Monitors", "result", monitorList)
-	if err := r.List(ctx, monitorList); err != nil {
+	err := r.List(ctx, monitorList,
+		client.InNamespace(obj.GetNamespace()),
+		client.MatchingFields{secretRefNameIndex: obj.GetName()})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list Monitors for Secret", "secret", client.ObjectKeyFromObject(obj))
 		return nil
 	}
 
-	var requests []ctrl.Request
+	requests := make([]ctrl.Request, 0, len(monitorList.Items))
 	for _, monitor := range monitorList.Items {
-		if monitor.Namespace == secret.Namespace && monitor.Spec.SecretRef.Name == secret.Name {
-			requests = append(requests, ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      monitor.Name,
-					Namespace: monitor.Namespace,
-				},
-			})
-		}
+		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&monitor)})
 	}
-
 	return requests
 }
 
