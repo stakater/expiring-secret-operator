@@ -80,7 +80,8 @@ type MonitorSpec struct {
 	AlertThresholds *AlertThresholds `json:"alertThresholds,omitempty"`
 }
 
-// Reference to a Secret to monitor.
+// Reference to a Secret to monitor. The Secret is resolved in the namespace of
+// the Monitor.
 // It should contain a label with the expiration timestamp in "YYYY-MM-DD" format, e.g.:
 //
 //	expiring-secrets.stakater.com/validUntil: "2025-12-31"
@@ -89,12 +90,6 @@ type SecretReference struct {
 	// +kubebuilder:validation:Required
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Name of the secret to monitor",xDescriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	Name string `json:"name"`
-
-	// Namespace is the namespace of the secret
-	// If empty, defaults to the same namespace as the Monitor
-	// +optional
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Namespace of the secret to monitor",xDescriptors="urn:alm:descriptor:io.kubernetes:Namespace"
-	Namespace string `json:"namespace,omitempty"`
 }
 
 // Define the thresholds for different alert levels

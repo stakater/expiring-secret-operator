@@ -79,7 +79,6 @@ spec:
   service: docker.io
   secretRef:
     name: docker-registry-token
-    namespace: default
   alertThresholds:
     infoDays: 30      # Start showing "Info" state 30 days before expiration
     warningDays: 14   # "Warning" state 14 days before  

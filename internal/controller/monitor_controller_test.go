@@ -29,6 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
@@ -169,7 +170,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("Creating the Monitor resource")
-			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret, Service)
+			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret.Name, Service)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("Reconciling the created resource")
@@ -194,7 +195,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("Creating the Monitor resource")
-			monitor := testutils.GenerateFullMonitor(nsMonitor, nsSecret, Service, &expiringsecretv1alpha1.AlertThresholds{
+			monitor := testutils.GenerateFullMonitor(nsMonitor, nsSecret.Name, Service, &expiringsecretv1alpha1.AlertThresholds{
 				InfoDays:     30,
 				WarningDays:  14,
 				CriticalDays: 7,
@@ -229,7 +230,7 @@ var _ = Describe("Monitor Controller", func() {
 			By("Creating the Monitor resource")
 			monitor := testutils.GenerateMonitorService(
 				nsMonitor,
-				h.NsName(SecretName, ""),
+				SecretName,
 				Service)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
@@ -246,9 +247,33 @@ var _ = Describe("Monitor Controller", func() {
 				})
 		})
 
+		It("reports SourceNotAvailable for a Secret that only exists in another namespace", func() {
+			other := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "other"}}
+			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, other))).To(Succeed())
+			future := time.Now().Add(20 * 24 * time.Hour).Format("2006-01-02")
+			shared := testutils.GenerateFullSecret(h.NsName("shared", "other"), future, []byte("x"))
+			Expect(k8sClient.Create(ctx, shared)).To(Succeed())
+			DeferCleanup(func() { Expect(k8sClient.Delete(ctx, shared)).To(Succeed()) })
+
+			monitor := testutils.GenerateMonitorService(nsMonitor, "shared", Service)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+			_, err := h.ReconcileOnce(newReconciler(), nsMonitor)
+			Expect(err).NotTo(HaveOccurred())
+
+			h.ExpectStatusEventually(nsMonitor, timeout, interval,
+				func(found *expiringsecretv1alpha1.Monitor) bool {
+					cond := meta.FindStatusCondition(found.Status.Conditions,
+						string(expiringsecretv1alpha1.MonitorConditionSourceAvailable))
+					return found.Status.State == expiringsecretv1alpha1.MonitorStateError &&
+						found.Status.ExpiresAt == nil &&
+						cond != nil && cond.Status == metav1.ConditionFalse &&
+						cond.Reason == "SourceNotAvailable"
+				})
+		})
+
 		It("should handle missing secret gracefully", func() {
 			By("Creating the Monitor resource without creating the secret")
-			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret, Service)
+			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret.Name, Service)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("Reconciling the created resource")
@@ -268,7 +293,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("Creating the Monitor resource")
-			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret, Service)
+			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret.Name, Service)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("Reconciling the created resource")
@@ -289,7 +314,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("Creating the Monitor resource")
-			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret, Service)
+			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret.Name, Service)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("Reconciling the created resource")
@@ -310,7 +335,7 @@ var _ = Describe("Monitor Controller", func() {
 
 			By("Creating the Monitor resource with 7-day critical threshold")
 
-			monitor := testutils.GenerateFullMonitor(nsMonitor, nsSecret, Service, &expiringsecretv1alpha1.AlertThresholds{
+			monitor := testutils.GenerateFullMonitor(nsMonitor, nsSecret.Name, Service, &expiringsecretv1alpha1.AlertThresholds{
 				CriticalDays: 7,
 			})
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
@@ -332,7 +357,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("Creating the Monitor resource")
-			monitor := testutils.GenerateFullMonitor(nsMonitor, nsSecret, Service, &expiringsecretv1alpha1.AlertThresholds{
+			monitor := testutils.GenerateFullMonitor(nsMonitor, nsSecret.Name, Service, &expiringsecretv1alpha1.AlertThresholds{
 				CriticalDays: 7,
 			})
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
@@ -368,7 +393,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("Creating the Monitor resource with a finalizer")
-			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret, Service)
+			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret.Name, Service)
 			controllerutil.AddFinalizer(monitor, monitorFinalizer)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
@@ -423,7 +448,7 @@ var _ = Describe("Monitor Controller", func() {
 		createMonitor := func() error {
 			monitor := testutils.GenerateMonitorService(
 				nsMonitor,
-				nsSecret,
+				nsSecret.Name,
 				Service,
 			)
 			return k8sClient.Create(ctx, monitor)
@@ -472,7 +497,7 @@ var _ = Describe("Monitor Controller", func() {
 			By("Manually removing finalizer from monitor", func() {
 				monitor := testutils.GenerateFullMonitor(
 					nsMonitor,
-					nsSecret,
+					nsSecret.Name,
 					Service,
 					&expiringsecretv1alpha1.AlertThresholds{
 						CriticalDays: 7,
@@ -595,7 +620,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("Creating the Monitor resource")
-			monitor = testutils.GenerateMonitorService(nsMonitor, nsSecret, Service)
+			monitor = testutils.GenerateMonitorService(nsMonitor, nsSecret.Name, Service)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("Reconciling the created resource")
@@ -766,8 +791,8 @@ var _ = Describe("Monitor Controller", func() {
 			By("Creating test resources for mapping")
 			secret := testutils.GenerateFullSecret(nsSecret1, "", []byte("test-token"))
 
-			monitor1 := testutils.GenerateMonitorService(nsMonitor1, nsSecret1, "docker.io")
-			monitor2 := testutils.GenerateMonitorService(nsMonitor2, nsSecret2, "docker.io")
+			monitor1 := testutils.GenerateMonitorService(nsMonitor1, nsSecret1.Name, "docker.io")
+			monitor2 := testutils.GenerateMonitorService(nsMonitor2, nsSecret2.Name, "docker.io")
 
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			Expect(k8sClient.Create(ctx, monitor1)).To(Succeed())
@@ -787,41 +812,6 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 
-		It("should handle cross-namespace references", func() {
-			nsSecret := h.NsName("cross-ns-secret", "secret-ns")
-			nsMonitor := h.NsName("cross-ns-monitor", "default")
-
-			ctx := context.Background()
-
-			By("Creating secret in different namespace")
-			secretNS := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: nsSecret.Namespace,
-				},
-			}
-			Expect(k8sClient.Create(ctx, secretNS)).To(Succeed())
-
-			secret := testutils.GenerateFullSecret(nsSecret, "", []byte("test-token"))
-
-			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret, "docker.io")
-
-			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
-
-			By("Testing cross-namespace mapping")
-			requests := reconciler.mapSecretToMonitor(ctx, secret)
-
-			By("Expecting one request for cross-namespace monitor")
-			Expect(requests).To(HaveLen(1))
-			Expect(requests[0].Name).To(Equal(nsMonitor.Name))
-			Expect(requests[0].Namespace).To(Equal(nsMonitor.Namespace))
-
-			By("Cleanup cross-namespace test resources")
-			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, secretNS)).To(Succeed())
-		})
-
 		It("should handle references without namespace", func() {
 			nsSecret := h.NsName("mapping-secret", "default")
 			nsMonitor := h.NsName("mapping-monitor", "default")
@@ -829,7 +819,7 @@ var _ = Describe("Monitor Controller", func() {
 			ctx := context.Background()
 
 			secret := testutils.GenerateFullSecret(nsSecret, "", []byte("test-token"))
-			monitor := testutils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := testutils.GenerateMonitor(nsMonitor, nsSecret.Name)
 
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
@@ -856,7 +846,7 @@ var _ = Describe("Monitor Controller", func() {
 
 			By("Creating a secret and a monitor that references a different secret")
 			secret := testutils.GenerateFullSecret(nsSecret, "", []byte("test-token"))
-			monitor := testutils.GenerateMonitor(nsMonitor, nsOtherSecret)
+			monitor := testutils.GenerateMonitor(nsMonitor, nsOtherSecret.Name)
 
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
@@ -911,8 +901,7 @@ var _ = Describe("Monitor Controller", func() {
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "test-secret",
-						Namespace: MonitorNamespace,
+						Name: "test-secret",
 					},
 					Service: Service,
 				},
@@ -952,8 +941,7 @@ var _ = Describe("Monitor Controller", func() {
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      TargetSecretName,
-						Namespace: MonitorNamespace,
+						Name: TargetSecretName,
 					},
 					Service: Service,
 				},
@@ -991,8 +979,7 @@ var _ = Describe("Monitor Controller", func() {
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      TargetSecretName,
-						Namespace: MonitorNamespace,
+						Name: TargetSecretName,
 					},
 					Service: Service,
 				},
@@ -1022,8 +1009,7 @@ var _ = Describe("Monitor Controller", func() {
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      TargetSecretName,
-						Namespace: MonitorNamespace,
+						Name: TargetSecretName,
 					},
 					Service: Service,
 				},
@@ -1060,8 +1046,7 @@ var _ = Describe("Monitor Controller", func() {
 				},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      "missing-secret",
-						Namespace: MonitorNamespace,
+						Name: "missing-secret",
 					},
 				},
 			}
@@ -1094,31 +1079,23 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(requests).To(BeNil())
 		})
 
-		It("should default secret namespace when secretRef namespace is empty", func() {
-			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "mapped-secret", Namespace: MonitorNamespace}}
+		It("should only map a Secret to Monitors in its own namespace", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       MonitorKind,
-				},
-				ObjectMeta: metav1.ObjectMeta{Name: "mapped-monitor", Namespace: MonitorNamespace},
+				ObjectMeta: metav1.ObjectMeta{Name: "m", Namespace: "a"},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
-					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      secret.Name,
-						Namespace: "",
-					},
-					Service: Service,
+					SecretRef: &expiringsecretv1alpha1.SecretReference{Name: "s"},
+					Service:   Service,
 				},
 			}
-
 			baseClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(monitor).Build()
 			reconciler := &MonitorReconciler{Client: baseClient, Scheme: scheme}
 
-			requests := reconciler.mapSecretToMonitor(ctx, secret)
-			Expect(requests).To(HaveLen(1))
-			Expect(requests[0].NamespacedName).To(Equal(types.NamespacedName{
-				Name:      monitor.Name,
-				Namespace: monitor.Namespace,
+			secretInB := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "b"}}
+			Expect(reconciler.mapSecretToMonitor(ctx, secretInB)).To(BeEmpty())
+
+			secretInA := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "a"}}
+			Expect(reconciler.mapSecretToMonitor(ctx, secretInA)).To(Equal([]ctrl.Request{
+				{NamespacedName: types.NamespacedName{Name: "m", Namespace: "a"}},
 			}))
 		})
 
@@ -1131,8 +1108,7 @@ var _ = Describe("Monitor Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "metric-error", Namespace: MonitorNamespace},
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name:      TargetSecretName,
-						Namespace: MonitorNamespace,
+						Name: TargetSecretName,
 					},
 					Service: Service,
 				},
@@ -1222,7 +1198,7 @@ var _ = Describe("Monitor Controller", func() {
 
 			monitor := testutils.GenerateMonitorService(
 				types.NamespacedName{Name: "metrics-monitor", Namespace: MonitorNamespace},
-				types.NamespacedName{Name: "metrics-secret", Namespace: MonitorNamespace},
+				"metrics-secret",
 				Service,
 			)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
@@ -1257,7 +1233,7 @@ var _ = Describe("Monitor Controller", func() {
 			// No Secret is created, so the source lookup fails.
 			monitor := testutils.GenerateMonitorService(
 				types.NamespacedName{Name: ErrorMetricsMonitorName, Namespace: MonitorNamespace},
-				types.NamespacedName{Name: "absent-secret", Namespace: MonitorNamespace},
+				"absent-secret",
 				Service,
 			)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())

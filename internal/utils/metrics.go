@@ -131,22 +131,15 @@ func (m *Metric) Labels() prometheus.Labels {
 	}
 
 	secretName := ""
-	secretNamespace := ""
 	if m.monitor.Spec.SecretRef != nil {
 		secretName = m.monitor.Spec.SecretRef.Name
-		secretNamespace = m.monitor.Spec.SecretRef.Namespace
-	}
-	// An empty secretRef namespace means the Monitor's own namespace, which
-	// is the same defaulting the reconciler applies when resolving it.
-	if secretNamespace == "" {
-		secretNamespace = m.monitor.Namespace
 	}
 
 	return prometheus.Labels{
 		LabelMonitorName:      m.monitor.Name,
 		LabelMonitorNamespace: m.monitor.Namespace,
 		LabelSecretName:       secretName,
-		LabelSecretNamespace:  secretNamespace,
+		LabelSecretNamespace:  m.monitor.Namespace,
 		LabelSecretService:    m.monitor.Spec.Service,
 	}
 }

@@ -95,7 +95,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			log.Info("Created secret with valid expiration date", "secret", nsSecret, "validUntil", futureDate)
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 			log.Info("Created monitor resource", "monitor", monitor)
 
@@ -123,7 +123,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			monitor = &expiringsecretv1alpha1.Monitor{}
@@ -160,7 +160,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			//Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 			err := k8sClient.Create(ctx, monitor)
 			if err != nil {
@@ -195,7 +195,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect expired state")
@@ -215,7 +215,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 		It("should handle missing secrets gracefully", func() {
 			By("creating a monitor resource referencing non-existent secret")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect error state")
@@ -241,7 +241,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect critical state")
@@ -265,7 +265,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect warning state")
@@ -334,7 +334,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating monitor that references cross-namespace secret")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to process cross-namespace secret")
@@ -406,7 +406,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(validMonitor, validSecret)
+			monitor := utils.GenerateMonitor(validMonitor, validSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor status to be updated")
@@ -427,7 +427,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource for secret with past expiration date")
-			monitor = utils.GenerateMonitor(expiredMonitor, expiredSecret)
+			monitor = utils.GenerateMonitor(expiredMonitor, expiredSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect expired state")

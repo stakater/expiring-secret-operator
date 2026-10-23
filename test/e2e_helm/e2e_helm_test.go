@@ -78,7 +78,7 @@ var _ = Describe("Operator installed via Helm chart", Ordered, func() {
 		secret := utils.GenerateValidDaysSecret(nsSecret, 365)
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-		monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+		monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 		Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 	})
 
@@ -89,7 +89,7 @@ var _ = Describe("Operator installed via Helm chart", Ordered, func() {
 		By("creating a secret far from expiry and a Monitor for it")
 		secret := utils.GenerateValidDaysSecret(nsSecret, 365)
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-		monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+		monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 		Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 		By("waiting for the Helm-installed operator to populate status")
@@ -114,7 +114,7 @@ var _ = Describe("Operator installed via Helm chart", Ordered, func() {
 		By("creating a secret past expiry and a Monitor for it")
 		secret := utils.GenerateValidDaysSecret(nsSecret, -5)
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-		monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+		monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 		Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 		By("waiting for the operator to detect the expired state")

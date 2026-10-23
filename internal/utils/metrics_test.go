@@ -35,12 +35,12 @@ import (
 const fixedExpiryUnix = int64(1800000000)
 
 func monitorWithStatus(
-	name, namespace, secretName, secretNamespace, service string,
+	name, namespace, secretName, service string,
 	state expiringsecretv1alpha1.MonitorState,
 ) *expiringsecretv1alpha1.Monitor {
 	monitor := testutils.GenerateFullMonitor(
 		types.NamespacedName{Name: name, Namespace: namespace},
-		types.NamespacedName{Name: secretName, Namespace: secretNamespace},
+		secretName,
 		service,
 		nil,
 	)
@@ -63,7 +63,7 @@ var _ = Describe("Metric", func() {
 
 	Context("label sets", func() {
 		It("omits state from the value gauge labels", func() {
-			monitor := monitorWithStatus("m", "ns", "s", "", "docker.io",
+			monitor := monitorWithStatus("m", "ns", "s", "docker.io",
 				expiringsecretv1alpha1.MonitorStateWarning)
 			labels := NewMetric(monitor).Labels()
 
@@ -71,13 +71,12 @@ var _ = Describe("Metric", func() {
 			Expect(labels[LabelMonitorName]).To(Equal("m"))
 			Expect(labels[LabelMonitorNamespace]).To(Equal("ns"))
 			Expect(labels[LabelSecretName]).To(Equal("s"))
-			// An empty secretRef namespace defaults to the Monitor's own.
 			Expect(labels[LabelSecretNamespace]).To(Equal("ns"))
 			Expect(labels[LabelSecretService]).To(Equal("docker.io"))
 		})
 
 		It("includes state in the state gauge labels", func() {
-			monitor := monitorWithStatus("m", "ns", "s", "ns", "quay.io",
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io",
 				expiringsecretv1alpha1.MonitorStateInfo)
 			labels := NewMetric(monitor).StateLabels()
 
@@ -88,13 +87,13 @@ var _ = Describe("Metric", func() {
 		It("builds deterministic label values without state", func() {
 			monitor := monitorWithStatus(
 				"label-values-monitor", "label-values-namespace",
-				"label-values-secret", "label-values-secret-namespace",
+				"label-values-secret",
 				"quay.io", expiringsecretv1alpha1.MonitorStateInfo)
 
 			expected := `monitor_name="label-values-monitor",` +
 				`monitor_namespace="label-values-namespace",` +
 				`secret_name="label-values-secret",` +
-				`secret_namespace="label-values-secret-namespace",` +
+				`secret_namespace="label-values-namespace",` +
 				`secret_service="quay.io"`
 			Expect(NewMetric(monitor).LabelValues()).To(Equal(expected))
 		})
@@ -102,7 +101,7 @@ var _ = Describe("Metric", func() {
 		It("tolerates a nil monitor and a nil secretRef", func() {
 			Expect(NewMetric(nil).Labels()).To(BeEmpty())
 
-			monitor := monitorWithStatus("m", "ns", "s", "ns", "quay.io",
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
 			monitor.Spec.SecretRef = nil
 			labels := NewMetric(monitor).Labels()
@@ -115,22 +114,22 @@ var _ = Describe("Metric", func() {
 		It("rejects incomplete status", func() {
 			Expect(NewMetric(nil).Update()).NotTo(Succeed())
 
-			monitor := monitorWithStatus("m", "ns", "s", "ns", "quay.io",
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
 			monitor.Status.ExpiresAt = nil
 			Expect(NewMetric(monitor).Update()).NotTo(Succeed())
 
-			monitor = monitorWithStatus("m", "ns", "s", "ns", "quay.io",
+			monitor = monitorWithStatus("m", "ns", "s", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
 			monitor.Status.SecondsRemaining = nil
 			Expect(NewMetric(monitor).Update()).NotTo(Succeed())
 
-			monitor = monitorWithStatus("m", "ns", "s", "ns", "quay.io", "")
+			monitor = monitorWithStatus("m", "ns", "s", "quay.io", "")
 			Expect(NewMetric(monitor).Update()).NotTo(Succeed())
 		})
 
 		It("publishes all three series", func() {
-			monitor := monitorWithStatus("m", "ns", "s", "ns", "quay.io",
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
 			Expect(NewMetric(monitor).Update()).To(Succeed())
 
@@ -144,7 +143,7 @@ var _ = Describe("Metric", func() {
 		It("leaves exactly one state series across a transition", func() {
 			// Regression test: state used to be a label on the value gauges,
 			// so each transition minted a new series and abandoned the old.
-			monitor := monitorWithStatus("m", "ns", "s", "ns", "quay.io",
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
 			Expect(NewMetric(monitor).Update()).To(Succeed())
 
@@ -161,7 +160,7 @@ var _ = Describe("Metric", func() {
 		})
 
 		It("leaves no orphan when the secretRef is retargeted", func() {
-			monitor := monitorWithStatus("m", "ns", "old-secret", "ns",
+			monitor := monitorWithStatus("m", "ns", "old-secret",
 				"quay.io", expiringsecretv1alpha1.MonitorStateValid)
 			Expect(NewMetric(monitor).Update()).To(Succeed())
 
@@ -173,7 +172,7 @@ var _ = Describe("Metric", func() {
 		})
 
 		It("leaves no orphan when the service changes", func() {
-			monitor := monitorWithStatus("m", "ns", "s", "ns", "quay.io",
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
 			Expect(NewMetric(monitor).Update()).To(Succeed())
 
@@ -184,9 +183,9 @@ var _ = Describe("Metric", func() {
 		})
 
 		It("does not disturb another Monitor's series", func() {
-			first := monitorWithStatus("first", "ns", "s1", "ns", "quay.io",
+			first := monitorWithStatus("first", "ns", "s1", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
-			second := monitorWithStatus("second", "ns", "s2", "ns", "quay.io",
+			second := monitorWithStatus("second", "ns", "s2", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
 			Expect(NewMetric(first).Update()).To(Succeed())
 			Expect(NewMetric(second).Update()).To(Succeed())
@@ -198,7 +197,7 @@ var _ = Describe("Metric", func() {
 		})
 
 		It("removes every series on cleanup", func() {
-			monitor := monitorWithStatus("m", "ns", "s", "ns", "quay.io",
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
 			Expect(NewMetric(monitor).Update()).To(Succeed())
 
@@ -212,7 +211,7 @@ var _ = Describe("Metric", func() {
 
 	Context("error state", func() {
 		It("drops the value gauges but keeps the failure alertable", func() {
-			monitor := monitorWithStatus("m", "ns", "s", "ns", "quay.io",
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io",
 				expiringsecretv1alpha1.MonitorStateValid)
 			Expect(NewMetric(monitor).Update()).To(Succeed())
 
@@ -229,7 +228,7 @@ var _ = Describe("Metric", func() {
 		})
 
 		It("defaults to the Error state when status carries none", func() {
-			monitor := monitorWithStatus("m", "ns", "s", "ns", "quay.io", "")
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io", "")
 			Expect(NewMetric(monitor).SetError()).To(Succeed())
 
 			labels := NewMetric(monitor).Labels()
@@ -246,7 +245,7 @@ var _ = Describe("Metric", func() {
 		It("exposes the documented names, labels and values", func() {
 			monitor := monitorWithStatus(
 				"contract-monitor", "contract-ns",
-				"contract-secret", "contract-ns",
+				"contract-secret",
 				"quay.io", expiringsecretv1alpha1.MonitorStateWarning)
 			Expect(NewMetric(monitor).Update()).To(Succeed())
 

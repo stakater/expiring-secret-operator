@@ -38,16 +38,11 @@ import (
 const LabelKey = "expiring-secrets.stakater.com/validUntil"
 
 func (r *MonitorReconciler) getSourceObject(s *reconcileState) (client.Object, error) {
-	// Get the referenced secret
-	secretNamespace := s.monitor.Spec.SecretRef.Namespace
-	if secretNamespace == "" {
-		secretNamespace = s.monitor.Namespace
-	}
-
+	// A Monitor may only watch a Secret in its own namespace.
 	secret := &corev1.Secret{}
 	secretKey := types.NamespacedName{
 		Name:      s.monitor.Spec.SecretRef.Name,
-		Namespace: secretNamespace,
+		Namespace: s.monitor.Namespace,
 	}
 
 	err := r.Get(s.ctx, secretKey, secret)
@@ -115,15 +110,7 @@ func (r *MonitorReconciler) mapSecretToMonitor(ctx context.Context, obj client.O
 
 	var requests []ctrl.Request
 	for _, monitor := range monitorList.Items {
-		secretNamespace := monitor.Spec.SecretRef.Namespace
-		if secretNamespace == "" {
-			logger.Info(
-				"SecretRef namespace is empty, defaulting to Monitor namespace",
-				"monitorNamespace", monitor.Namespace)
-			secretNamespace = monitor.Namespace
-		}
-
-		if monitor.Spec.SecretRef.Name == secret.Name && secretNamespace == secret.Namespace {
+		if monitor.Namespace == secret.Namespace && monitor.Spec.SecretRef.Name == secret.Name {
 			requests = append(requests, ctrl.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      monitor.Name,
