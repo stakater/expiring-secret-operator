@@ -814,22 +814,6 @@ var _ = Describe("Monitor Controller", func() {
 
 	})
 
-	Context("When testing controller setup", func() {
-		It("should setup controller with manager successfully", func() {
-			By("Creating a mock manager")
-			reconciler := newReconciler()
-
-			By("Setting up with manager - this exercises SetupWithManager")
-			// Note: In a real test environment, you might need a proper manager
-			// For coverage purposes, we can at least call the function
-			// err := reconciler.SetupWithManager(mgr)
-			// Expect(err).NotTo(HaveOccurred())
-
-			// For now, just verify the function exists and is callable
-			Expect(reconciler.SetupWithManager).NotTo(BeNil())
-		})
-	})
-
 	Context("When testing helper functions", func() {
 		It("should handle updateMetrics with nil ExpiresAt", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{

@@ -231,28 +231,28 @@ func (r *MonitorReconciler) handleDeletion(s *reconcileState) (ctrl.Result, erro
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	err := mgr.GetFieldIndexer().IndexField(context.Background(),
-		&expiringsecretv1alpha1.Monitor{}, secretRefNameIndex, indexMonitorBySecretName)
-	if err != nil {
+	if err := indexMonitors(mgr); err != nil {
 		return err
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&expiringsecretv1alpha1.Monitor{}, builder.WithPredicates(predicate.Funcs{
-			CreateFunc: monitorCreatePredicate,
-			UpdateFunc: monitorUpdatePredicate,
-			DeleteFunc: monitorDeletePredicate,
+			CreateFunc: monitorCreatePredicate, UpdateFunc: monitorUpdatePredicate, DeleteFunc: monitorDeletePredicate,
 		})).
 		Watches(
 			&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(r.mapSecretToMonitor),
 			builder.WithPredicates(predicate.Funcs{
-				CreateFunc: secretCreatePredicate,
-				UpdateFunc: secretUpdatePredicate,
-				DeleteFunc: secretDeletePredicate,
+				CreateFunc: secretCreatePredicate, UpdateFunc: secretUpdatePredicate, DeleteFunc: secretDeletePredicate,
 			}),
 			builder.OnlyMetadata,
 		).
 		WithOptions(controller.Options{RateLimiter: newRateLimiter()}).
 		Named("monitor").
 		Complete(r)
+}
+
+// indexMonitors registers the secretRefNameIndex that mapSecretToMonitor uses.
+func indexMonitors(mgr ctrl.Manager) error {
+	return mgr.GetFieldIndexer().IndexField(context.Background(),
+		&expiringsecretv1alpha1.Monitor{}, secretRefNameIndex, indexMonitorBySecretName)
 }
