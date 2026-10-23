@@ -85,11 +85,13 @@ spec:
     criticalDays: 7   # "Critical" state 7 days before
 ```
 
+The Secret must be in the same namespace as the Monitor.
+
 ### 4. Check Status
 
 ```bash
 kubectl get monitor docker-registry-monitor -o wide
-# NAME                     REGISTRY   SECRET                 STATE   EXPIRES AT             AGE
+# NAME                     SERVICE    SECRET                 STATE   EXPIRES AT             AGE
 # docker-registry-monitor  docker.io  docker-registry-token  Info    2026-03-15T00:00:00Z   1m
 ```
 
@@ -230,11 +232,10 @@ flowchart TD
     GET_MONITOR -->|Not Found| CLEANUP[Clean up metrics]
     CLEANUP --> END_SUCCESS([Success - Monitor deleted])
     
-    GET_MONITOR -->|Found| DEFAULTS[Apply default alert thresholds]
-    DEFAULTS --> GET_SECRET{Get referenced Secret}
+    GET_MONITOR -->|Found| GET_SECRET{Get referenced Secret}
     
     GET_SECRET -->|Not Found| ERROR_SECRET[Status: Error - Secret not found]
-    ERROR_SECRET --> END_ERROR([Error - Requeue])
+    ERROR_SECRET --> END_ERROR([Status: Error, re-check in 1 minute])
     
     GET_SECRET -->|Found| CHECK_LABEL{Has validUntil label?}
     
@@ -272,7 +273,7 @@ flowchart TD
     
     class ERROR_SECRET,ERROR_LABEL,ERROR_PARSE,END_ERROR errorPath
     class STATE_EXPIRED,STATE_CRITICAL,STATE_WARNING,STATE_INFO,STATE_VALID,END_SUCCESS successPath
-    class DEFAULTS,CALC_REMAINING,UPDATE_METRICS,UPDATE_STATUS,REQUEUE processPath
+    class CALC_REMAINING,UPDATE_METRICS,UPDATE_STATUS,REQUEUE processPath
 ```
 
 ## Requirements
