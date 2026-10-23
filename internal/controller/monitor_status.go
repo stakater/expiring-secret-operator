@@ -26,6 +26,15 @@ import (
 	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
 )
 
+// Condition reasons a Monitor reports.
+const (
+	ReasonReady               = "Ready"
+	ReasonSourceNotAvailable  = "SourceNotAvailable"
+	ReasonSourceLabelNotFound = "SourceLabelNotFound"
+	ReasonSourceLabelInvalid  = "SourceLabelInvalid"
+	ReasonAPIError            = "APIError"
+)
+
 const (
 	secretIsValid   = "Secret is valid until %s"
 	secretExpiresIn = "Secret expires in less than %d days"
@@ -40,6 +49,20 @@ func setCondition(m *expiringsecretv1alpha1.Monitor, t expiringsecretv1alpha1.Mo
 		Reason:  reason,
 		Message: message,
 	})
+}
+
+// setErrorConditions marks Ready False and, for user errors, the condition
+// that names what is wrong with the source Secret.
+func setErrorConditions(m *expiringsecretv1alpha1.Monitor, reason, message string) {
+	setCondition(m, expiringsecretv1alpha1.MonitorConditionReady, metav1.ConditionFalse, reason, message)
+	switch reason {
+	case ReasonSourceNotAvailable:
+		setCondition(m, expiringsecretv1alpha1.MonitorConditionSourceAvailable, metav1.ConditionFalse, reason, message)
+	case ReasonSourceLabelNotFound:
+		setCondition(m, expiringsecretv1alpha1.MonitorConditionSourceLabelFound, metav1.ConditionFalse, reason, message)
+	case ReasonSourceLabelInvalid:
+		setCondition(m, expiringsecretv1alpha1.MonitorConditionSourceLabelValid, metav1.ConditionFalse, reason, message)
+	}
 }
 
 // applyDefaultAlertThresholds sets default values for alert thresholds if they

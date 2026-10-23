@@ -52,9 +52,27 @@ func pointerInt64(i int64) *int64 { return &i }
 
 type errorClient struct {
 	client.Client
-	updateErr error
-	listErr   error
-	getErr    error
+	updateErr      error
+	listErr        error
+	getErr         error // fails Secret metadata reads only
+	statusPatchErr error
+}
+
+// errorStatusWriter fails every status Patch with patchErr.
+type errorStatusWriter struct {
+	client.SubResourceWriter
+	patchErr error
+}
+
+func (w *errorStatusWriter) Patch(context.Context, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
+	return w.patchErr
+}
+
+func (e *errorClient) Status() client.SubResourceWriter {
+	if e.statusPatchErr != nil {
+		return &errorStatusWriter{SubResourceWriter: e.Client.Status(), patchErr: e.statusPatchErr}
+	}
+	return e.Client.Status()
 }
 
 func (e *errorClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
@@ -72,7 +90,7 @@ func (e *errorClient) List(ctx context.Context, list client.ObjectList, opts ...
 }
 
 func (e *errorClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	if e.getErr != nil {
+	if _, isSecret := obj.(*metav1.PartialObjectMetadata); isSecret && e.getErr != nil {
 		return e.getErr
 	}
 	return e.Client.Get(ctx, key, obj, opts...)
@@ -307,6 +325,29 @@ var _ = Describe("Monitor Controller", func() {
 					return found.Status.State == expiringsecretv1alpha1.MonitorStateError &&
 						found.Status.Message != ""
 				})
+		})
+
+		It("recovers once the missing label is added", func() {
+			secret := testutils.GenerateFullSecret(nsSecret, "", []byte("fake-token"))
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, testutils.GenerateMonitorService(nsMonitor, nsSecret.Name, Service))).To(Succeed())
+
+			_, err := h.ReconcileOnce(newReconciler(), nsMonitor)
+			Expect(err).NotTo(HaveOccurred())
+			found := &expiringsecretv1alpha1.Monitor{}
+			Expect(k8sClient.Get(ctx, nsMonitor, found)).To(Succeed())
+			Expect(found.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateError))
+			Expect(found.Status.Message).To(ContainSubstring("Source object does not have any labels"))
+
+			By("adding only the validUntil label")
+			Expect(k8sClient.Get(ctx, nsSecret, secret)).To(Succeed())
+			secret.Labels = map[string]string{LabelKey: time.Now().AddDate(1, 0, 0).Format("2006-01-02")}
+			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+			_, err = h.ReconcileOnce(newReconciler(), nsMonitor)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, nsMonitor, found)).To(Succeed())
+			Expect(found.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateValid))
 		})
 
 		It("should handle expired secrets correctly", func() {
@@ -948,17 +989,35 @@ var _ = Describe("Monitor Controller", func() {
 				},
 			}
 
-			baseClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+			baseClient := fake.NewClientBuilder().WithScheme(scheme).
+				WithObjects(monitor).WithStatusSubresource(monitor).Build()
+			cause := errors.New("get failed")
 			reconciler := &MonitorReconciler{
-				Client: &errorClient{
-					Client: baseClient,
-					getErr: errors.New("get failed"),
-				},
+				Client: &errorClient{Client: baseClient, getErr: cause},
 				Scheme: scheme,
 			}
 
-			_, err := reconciler.getSourceObject(newReconcileState(ctx, monitor))
-			Expect(err).To(HaveOccurred())
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(monitor)})
+			Expect(errors.Is(err, cause)).To(BeTrue())
+
+			found := &expiringsecretv1alpha1.Monitor{}
+			Expect(baseClient.Get(ctx, client.ObjectKeyFromObject(monitor), found)).To(Succeed())
+			Expect(found.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateError))
+		})
+
+		It("returns the error when the status patch fails", func() {
+			monitor := testutils.GenerateMonitorService(
+				types.NamespacedName{Name: "patch-error-monitor", Namespace: MonitorNamespace}, TargetSecretName, Service)
+			baseClient := fake.NewClientBuilder().WithScheme(scheme).
+				WithObjects(monitor).WithStatusSubresource(monitor).Build()
+			patchErr := errors.New("patch failed")
+			reconciler := &MonitorReconciler{
+				Client: &errorClient{Client: baseClient, statusPatchErr: patchErr},
+				Scheme: scheme,
+			}
+
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(monitor)})
+			Expect(errors.Is(err, patchErr)).To(BeTrue())
 		})
 
 		It("should tolerate metrics update error in handleSuccess", func() {
@@ -1113,7 +1172,67 @@ var _ = Describe("Monitor Controller", func() {
 			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 		})
+
+		It("drops the value gauges when the Secret disappears", func() {
+			ctx := context.Background()
+			name := types.NamespacedName{Name: "vanishing-monitor", Namespace: MonitorNamespace}
+			secret := testutils.GenerateValidDaysSecret(
+				types.NamespacedName{Name: "vanishing-secret", Namespace: MonitorNamespace}, 60)
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			monitor := testutils.GenerateMonitorService(name, secret.Name, Service)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+			reconciler := newReconciler()
+			DeferCleanup(func() {
+				Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+				_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(testutil.CollectAndCount(utils.SecretValidUntilTimestamp)).To(Equal(1))
+
+			By("deleting the Secret")
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			found := &expiringsecretv1alpha1.Monitor{}
+			Expect(k8sClient.Get(ctx, name, found)).To(Succeed())
+			Expect(found.Status.State).To(Equal(expiringsecretv1alpha1.MonitorStateError))
+			Expect(testutil.CollectAndCount(utils.SecretValidUntilTimestamp)).To(Equal(0))
+			Expect(testutil.CollectAndCount(utils.MonitorStateGauge)).To(Equal(1))
+			state, err := utils.MonitorStateGauge.GetMetricWith(utils.NewMetric(found).StateLabels())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(testutil.ToFloat64(state)).To(Equal(1.0))
+		})
 	})
+
+	DescribeTable("handleError result by reason",
+		func(reason string, cause error) {
+			monitor := testutils.GenerateMonitorService(
+				types.NamespacedName{Name: "reason-monitor", Namespace: MonitorNamespace}, "absent", Service)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+			DeferCleanup(func() {
+				utils.NewMetric(monitor).Cleanup()
+				Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+			})
+			r := &MonitorReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+
+			result, err := r.handleError(newReconcileState(ctx, monitor), cause, reason, "msg")
+			if reason == ReasonAPIError {
+				Expect(result).To(Equal(ctrl.Result{}))
+				Expect(errors.Is(err, cause)).To(BeTrue())
+				return
+			}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(time.Minute))
+		},
+		Entry("source not available", ReasonSourceNotAvailable, nil),
+		Entry("label not found", ReasonSourceLabelNotFound, nil),
+		Entry("label invalid", ReasonSourceLabelInvalid, nil),
+		Entry("API error", ReasonAPIError, errors.New("boom")),
+	)
 
 	Context("When reconciling concurrently", func() {
 		It("reconciles and maps Secrets concurrently without a data race", func() {

@@ -69,7 +69,7 @@ func parseValidUntil(log logr.Logger, sourceObj client.Object) (time.Time, *Moni
 		msg := fmt.Sprintf("Source object does not have any labels, expected %s label", LabelKey)
 		log.Error(nil, msg, "name", sourceObj.GetName(), "namespace", sourceObj.GetNamespace())
 		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  sourceLabelNotAvailable,
+			Reason:  ReasonSourceLabelNotFound,
 			Message: msg,
 		}
 	}
@@ -83,7 +83,7 @@ func parseValidUntil(log logr.Logger, sourceObj client.Object) (time.Time, *Moni
 			"expectedLabel", LabelKey,
 		)
 		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  sourceLabelNotAvailable,
+			Reason:  ReasonSourceLabelNotFound,
 			Message: msg,
 		}
 	}
@@ -93,7 +93,7 @@ func parseValidUntil(log logr.Logger, sourceObj client.Object) (time.Time, *Moni
 		msg := fmt.Sprintf("Failed to parse validUntil date (expected YYYY-MM-DD format): %v", err)
 		log.Error(err, "Failed to parse validUntil date", "validUntil", validUntilStr)
 		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  "SourceLabelInvalid",
+			Reason:  ReasonSourceLabelInvalid,
 			Message: msg,
 		}
 	}

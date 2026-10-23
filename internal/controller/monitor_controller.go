@@ -18,11 +18,12 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -57,10 +58,7 @@ func newReconcileState(ctx context.Context, m *expiringsecretv1alpha1.Monitor) *
 	return &reconcileState{ctx: ctx, log: log.FromContext(ctx), monitor: m, original: m.DeepCopy()}
 }
 
-const (
-	monitorFinalizer        = "expiring-secrets.stakater.com/monitor-finalizer"
-	sourceLabelNotAvailable = "sourceLabelNotAvailable"
-)
+const monitorFinalizer = "expiring-secrets.stakater.com/monitor-finalizer"
 
 type MonitorErrorReasonMessage struct {
 	Reason  string
@@ -81,7 +79,7 @@ func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	monitor := &expiringsecretv1alpha1.Monitor{}
 	if err := r.Get(ctx, req.NamespacedName, monitor); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -137,7 +135,7 @@ func (r *MonitorReconciler) observeSource(s *reconcileState) (ctrl.Result, error
 	sourceObj, err := r.getSourceObject(s)
 	if err != nil {
 		s.log.Error(err, "Failed to get source Secret", "reference", s.monitor.Spec.SecretRef)
-		return r.handleError(s, err, "SourceNotAvailable", "Failed to get source Secret")
+		return r.handleSourceError(s, err)
 	}
 
 	validUntil, parseErr := parseValidUntil(s.log, sourceObj)
@@ -170,7 +168,7 @@ func (r *MonitorReconciler) handleSuccess(s *reconcileState) (ctrl.Result, error
 		"Source label has been found")
 	setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionReady,
 		"True",
-		"Ready",
+		ReasonReady,
 		"Monitor is ready")
 
 	return ctrl.Result{
@@ -179,42 +177,38 @@ func (r *MonitorReconciler) handleSuccess(s *reconcileState) (ctrl.Result, error
 	}, r.Status().Patch(s.ctx, s.monitor, client.MergeFrom(s.original))
 }
 
+// handleSourceError reports a failed Secret lookup: a missing Secret is a
+// user error, anything else an API error.
+func (r *MonitorReconciler) handleSourceError(s *reconcileState, err error) (ctrl.Result, error) {
+	reason := ReasonAPIError
+	if errors.Is(err, errSecretNotFound) {
+		reason = ReasonSourceNotAvailable
+	}
+	return r.handleError(s, err, reason, "Failed to get source Secret")
+}
+
+// handleError records the failure in status. User errors are re-checked
+// after a minute; an API error is returned so the controller backs off.
 func (r *MonitorReconciler) handleError(s *reconcileState, cause error, reason, message string) (ctrl.Result, error) {
-	detailedMessage := message
 	if cause != nil {
-		detailedMessage = detailedMessage + ": " + cause.Error()
+		message = message + ": " + cause.Error()
 	}
 	s.monitor.Status.State = expiringsecretv1alpha1.MonitorStateError
-	s.monitor.Status.Message = detailedMessage // Set the error message in status
-
-	s.log.Info("Handling Monitor error", "reason", reason, "message", detailedMessage)
+	s.monitor.Status.Message = message
+	s.log.Info("Handling Monitor error", "reason", reason, "message", message)
 
 	// Drop the value gauges, whose expiry is unknown, but keep publishing the
 	// state so a failing Monitor stays alertable rather than going silent.
 	if err := utils.NewMetric(s.monitor).WithLogger(s.log).SetError(); err != nil {
 		s.log.Error(err, "Failed to publish error state metric", "monitor", s.monitor.Name)
 	}
+	setErrorConditions(s.monitor, reason, message)
 
-	// Always set Ready condition to False on error
-	setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionReady, "False", reason, detailedMessage)
-
-	// Make sure SourceAvailable and ServiceAccountSynced are marked False when we fail
-	if reason == "SourceNotAvailable" || reason == "SourceDataInvalid" {
-		setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceAvailable, "False", reason, detailedMessage)
+	patchErr := r.Status().Patch(s.ctx, s.monitor, client.MergeFrom(s.original))
+	if reason == ReasonAPIError {
+		return ctrl.Result{}, errors.Join(cause, patchErr)
 	}
-
-	// sourceLabelNotAvailable indicates that the expected label is missing,
-	// while SourceLabelInvalid indicates that the label value is not in the
-	// expected format.
-	// Both conditions should be set accordingly based on the error reason.
-	if reason == sourceLabelNotAvailable {
-		setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceLabelFound, "False", reason, detailedMessage)
-	}
-	if reason == "SourceLabelInvalid" {
-		setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceLabelValid, "False", reason, detailedMessage)
-	}
-
-	return ctrl.Result{}, r.Status().Patch(s.ctx, s.monitor, client.MergeFrom(s.original))
+	return ctrl.Result{RequeueAfter: time.Minute}, patchErr
 }
 
 func (r *MonitorReconciler) handleDeletion(s *reconcileState) (ctrl.Result, error) {
