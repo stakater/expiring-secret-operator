@@ -55,6 +55,8 @@ hygiene. None block a release on their own.
 
 ### C-01 Reconciler shares request state across `goroutines` (High)
 
+> Fixed in PR #49.
+
 **Where:** `internal/controller/monitor_controller.go` lines 46-56
 (struct), 83-95 (`Reconcile`), 408-410 (`mapSecretToMonitor`).
 
