@@ -58,7 +58,9 @@ func newReconcileState(ctx context.Context, m *expiringsecretv1alpha1.Monitor) *
 	return &reconcileState{ctx: ctx, log: log.FromContext(ctx), monitor: m, original: m.DeepCopy()}
 }
 
-const monitorFinalizer = "expiring-secrets.stakater.com/monitor-finalizer"
+// legacyFinalizer was added by earlier releases. Nothing adds it any more;
+// Reconcile strips it so those Monitors can be deleted.
+const legacyFinalizer = "expiring-secrets.stakater.com/monitor-finalizer"
 
 type MonitorErrorReasonMessage struct {
 	Reason  string
@@ -80,54 +82,36 @@ func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	monitor := &expiringsecretv1alpha1.Monitor{}
 	if err := r.Get(ctx, req.NamespacedName, monitor); err != nil {
 		if apierrors.IsNotFound(err) {
+			utils.CleanupMonitor(req.NamespacedName)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
-	return r.reconcileMonitor(newReconcileState(ctx, monitor), req)
+	return r.reconcileMonitor(newReconcileState(ctx, monitor))
 }
 
-func (r *MonitorReconciler) reconcileMonitor(s *reconcileState, req ctrl.Request) (ctrl.Result, error) {
-	s.log.Info("Is deleted?", "res", s.monitor.DeletionTimestamp)
-	if s.monitor.DeletionTimestamp != nil {
-		s.log.Info("Handling deletion of Monitor", "namespace", req.Namespace, "name", req.Name)
-		return r.handleDeletion(s)
-	}
-
-	requeue, err := r.ensureFinalizerAndDefaults(s, req)
-	if err != nil {
+func (r *MonitorReconciler) reconcileMonitor(s *reconcileState) (ctrl.Result, error) {
+	if stripped, err := r.stripLegacyFinalizer(s); err != nil {
 		return ctrl.Result{}, err
+	} else if stripped {
+		// The Update moved the object on; patch status against its new state.
+		s.original = s.monitor.DeepCopy()
 	}
-	if requeue {
-		return ctrl.Result{RequeueAfter: time.Second}, nil
+	if s.monitor.DeletionTimestamp != nil {
+		return ctrl.Result{}, nil
 	}
+	s.monitor.Status.ObservedGeneration = s.monitor.Generation
 	return r.observeSource(s)
 }
 
-// ensureFinalizerAndDefaults adds the finalizer and default alert thresholds
-// in a single update. It reports whether the update failed and should be
-// requeued.
-func (r *MonitorReconciler) ensureFinalizerAndDefaults(s *reconcileState, req ctrl.Request) (bool, error) {
-	needsUpdate := false
-	if !controllerutil.ContainsFinalizer(s.monitor, monitorFinalizer) {
-		s.log.Info("Adding finalizer to Monitor", "namespace", req.Namespace, "name", req.Name)
-		controllerutil.AddFinalizer(s.monitor, monitorFinalizer)
-		needsUpdate = true
-	}
-	if applyDefaultAlertThresholds(s.monitor) {
-		s.log.Info("Applying default alert thresholds to Monitor", "namespace", req.Namespace, "name", req.Name)
-		needsUpdate = true
-	}
-	if !needsUpdate {
+// stripLegacyFinalizer removes the finalizer earlier releases added and
+// reports whether it did.
+func (r *MonitorReconciler) stripLegacyFinalizer(s *reconcileState) (bool, error) {
+	if !controllerutil.RemoveFinalizer(s.monitor, legacyFinalizer) {
 		return false, nil
 	}
-	if err := r.Update(s.ctx, s.monitor); err != nil {
-		s.log.Info("Conflict updating Monitor spec, requeueing", "error", err)
-		return true, nil
-	}
-	// Re-fetch after spec update to work with latest version
-	s.monitor = &expiringsecretv1alpha1.Monitor{}
-	return false, r.Get(s.ctx, req.NamespacedName, s.monitor)
+	s.log.Info("Removing legacy finalizer from Monitor")
+	return true, r.Update(s.ctx, s.monitor)
 }
 
 // observeSource reads the source Secret and records its expiry in the status.
@@ -146,7 +130,6 @@ func (r *MonitorReconciler) observeSource(s *reconcileState) (ctrl.Result, error
 
 	calculateState(s.monitor, validUntil, time.Now())
 	setStatusMessage(s.monitor)
-	s.monitor.Status.ObservedGeneration = s.monitor.Generation
 	return r.handleSuccess(s)
 }
 
@@ -208,24 +191,6 @@ func (r *MonitorReconciler) handleError(s *reconcileState, cause error, reason, 
 		return ctrl.Result{}, errors.Join(cause, patchErr)
 	}
 	return ctrl.Result{RequeueAfter: time.Minute}, patchErr
-}
-
-func (r *MonitorReconciler) handleDeletion(s *reconcileState) (ctrl.Result, error) {
-	s.log.Info("Handling Monitor deletion", "name", s.monitor.Name)
-
-	if !controllerutil.ContainsFinalizer(s.monitor, monitorFinalizer) {
-		return ctrl.Result{}, nil
-	}
-
-	utils.NewMetric(s.monitor).WithLogger(s.log).Cleanup()
-
-	controllerutil.RemoveFinalizer(s.monitor, monitorFinalizer)
-	if err := r.Update(s.ctx, s.monitor); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	s.log.Info("Delete complete", "name", s.monitor.Name)
-	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -65,34 +65,6 @@ func setErrorConditions(m *expiringsecretv1alpha1.Monitor, reason, message strin
 	}
 }
 
-// applyDefaultAlertThresholds sets default values for alert thresholds if they
-// are not provided
-func applyDefaultAlertThresholds(m *expiringsecretv1alpha1.Monitor) bool {
-	if m.Spec.AlertThresholds == nil {
-		m.Spec.AlertThresholds = &expiringsecretv1alpha1.AlertThresholds{
-			InfoDays:     30,
-			WarningDays:  14,
-			CriticalDays: 7,
-		}
-		return true
-	} else {
-		changed := false
-		if m.Spec.AlertThresholds.InfoDays == 0 {
-			m.Spec.AlertThresholds.InfoDays = 30
-			changed = true
-		}
-		if m.Spec.AlertThresholds.WarningDays == 0 {
-			m.Spec.AlertThresholds.WarningDays = 14
-			changed = true
-		}
-		if m.Spec.AlertThresholds.CriticalDays == 0 {
-			m.Spec.AlertThresholds.CriticalDays = 7
-			changed = true
-		}
-		return changed
-	}
-}
-
 // calculateState determines the current state based on alert thresholds
 func calculateState(m *expiringsecretv1alpha1.Monitor, validUntil, now time.Time) {
 	// Update the Monitor status

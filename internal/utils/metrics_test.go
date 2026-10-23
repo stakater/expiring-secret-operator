@@ -209,6 +209,24 @@ var _ = Describe("Metric", func() {
 		})
 	})
 
+	Context("CleanupMonitor", func() {
+		It("removes every series for the key and returns their count", func() {
+			monitor := monitorWithStatus("m", "ns", "s", "quay.io",
+				expiringsecretv1alpha1.MonitorStateValid)
+			other := monitorWithStatus("other", "ns", "s", "quay.io",
+				expiringsecretv1alpha1.MonitorStateValid)
+			Expect(NewMetric(monitor).Update()).To(Succeed())
+			Expect(NewMetric(other).Update()).To(Succeed())
+
+			Expect(CleanupMonitor(types.NamespacedName{Name: "m", Namespace: "ns"})).To(Equal(3))
+
+			Expect(testutil.CollectAndCount(SecretValidUntilTimestamp)).To(Equal(1))
+			Expect(testutil.CollectAndCount(SecretSecondsUntilExpiry)).To(Equal(1))
+			Expect(testutil.CollectAndCount(MonitorStateGauge)).To(Equal(1))
+			Expect(CleanupMonitor(types.NamespacedName{Name: "m", Namespace: "ns"})).To(BeZero())
+		})
+	})
+
 	Context("error state", func() {
 		It("drops the value gauges but keeps the failure alertable", func() {
 			monitor := monitorWithStatus("m", "ns", "s", "quay.io",

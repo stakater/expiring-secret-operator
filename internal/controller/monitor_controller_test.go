@@ -29,13 +29,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -171,10 +171,6 @@ var _ = Describe("Monitor Controller", func() {
 				testutils.ObjectResource{
 					Name:     nsMonitor,
 					Resource: &expiringsecretv1alpha1.Monitor{},
-					F: func() error {
-						_, err := h.ReconcileOnce(newReconciler(), nsMonitor)
-						return err
-					},
 				},
 				testutils.ObjectResource{
 					Name:     nsSecret,
@@ -428,41 +424,6 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeZero())
 		})
-
-		It("should remove finalizer on deletion", func() {
-			By("Creating a secret with validUntil label")
-			futureTime := time.Now().Add(10 * 24 * time.Hour)
-			secret := testutils.GenerateFullSecret(nsSecret, futureTime.Format("2006-01-02"), []byte("fake-token"))
-			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-
-			By("Creating the Monitor resource with a finalizer")
-			monitor := testutils.GenerateMonitorService(nsMonitor, nsSecret.Name, Service)
-			controllerutil.AddFinalizer(monitor, monitorFinalizer)
-			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
-
-			controllerReconciler := newReconciler()
-			By("Reconciling once to ensure controller handles it")
-			_, err := controllerReconciler.Reconcile(ctx, ctrl.Request{
-				NamespacedName: nsMonitor,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Deleting the Monitor resource")
-			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
-
-			By("Reconciling deletion to remove finalizer")
-			_, err = controllerReconciler.Reconcile(ctx, ctrl.Request{
-				NamespacedName: nsMonitor,
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Ensuring the Monitor is fully deleted")
-			Eventually(func() bool {
-				m := &expiringsecretv1alpha1.Monitor{}
-				err := k8sClient.Get(ctx, nsMonitor, m)
-				return client.IgnoreNotFound(err) == nil
-			}, timeout, interval).Should(BeTrue())
-		})
 	})
 
 	Context("Can handle invalid values", func() {
@@ -480,10 +441,7 @@ var _ = Describe("Monitor Controller", func() {
 		ctx := context.Background()
 		//logger := log.FromContext(ctx)
 
-		var (
-			controllerReconciler *MonitorReconciler
-			h                    *testutils.TestHelper
-		)
+		var h *testutils.TestHelper
 		nsSecret := h.NsName(SecretName, SecretNamespace)
 
 		nsMonitor := h.NsName(MonitorName, MonitorNamespace)
@@ -504,16 +462,9 @@ var _ = Describe("Monitor Controller", func() {
 			err := k8sClient.Create(ctx, secret)
 			return secret, err
 		}
-		getMonitor := func() (*expiringsecretv1alpha1.Monitor, error) {
-			monitor := &expiringsecretv1alpha1.Monitor{}
-			err := k8sClient.Get(ctx, nsMonitor, monitor)
-			return monitor, err
-		}
 
 		BeforeEach(func() {
 			h = testutils.NewHelper(ctx, k8sClient)
-			controllerReconciler = newReconciler()
-
 			h.VerifyNamespaces(nsSecret, nsMonitor)
 
 			By("Creating secret")
@@ -532,51 +483,6 @@ var _ = Describe("Monitor Controller", func() {
 					Resource: &corev1.Secret{},
 				},
 			)
-		})
-
-		It("should handle failing to add finalizer", func() {
-			testFinalizer := "testing.stakater.com/test-finalizer"
-
-			By("Manually removing finalizer from monitor", func() {
-				monitor := testutils.GenerateFullMonitor(
-					nsMonitor,
-					nsSecret.Name,
-					Service,
-					&expiringsecretv1alpha1.AlertThresholds{
-						CriticalDays: 7,
-					},
-				)
-				controllerutil.AddFinalizer(monitor, testFinalizer)
-				Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
-			})
-
-			monitor, err := getMonitor()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
-
-			By("Reconcile and expecting it to fail due to test finalizer")
-			_, err = controllerReconciler.Reconcile(ctx, ctrl.Request{
-				NamespacedName: nsMonitor,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			monitor, err = getMonitor()
-			Expect(err).NotTo(HaveOccurred())
-			testutils.Log("Monitor finalizers after reconcile: %+v", monitor)
-
-			controllerutil.RemoveFinalizer(monitor, testFinalizer)
-			Expect(k8sClient.Update(ctx, monitor)).To(Succeed())
-		})
-
-		It("should handle invalid state", func() {
-			Expect(createMonitor()).To(Succeed())
-
-			By("Retrieving the Monitor resource")
-			monitor := &expiringsecretv1alpha1.Monitor{}
-			Expect(k8sClient.Get(ctx, nsMonitor, monitor)).To(Succeed())
-
-			By("Manually setting invalid values")
-			monitor.Status.State = ""
-			setStatusMessage(monitor)
 		})
 
 		It("should handle Status.ExpiresAt nil", func() {
@@ -851,109 +757,61 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(expiringsecretv1alpha1.AddToScheme(scheme)).To(Succeed())
 		})
 
-		It("should requeue when updating spec fails", func() {
-			monitor := &expiringsecretv1alpha1.Monitor{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       MonitorKind,
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "requeue-monitor",
-					Namespace: MonitorNamespace,
-				},
-				Spec: expiringsecretv1alpha1.MonitorSpec{
-					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name: TargetSecretName,
-					},
-					Service: Service,
-				},
+		legacyMonitor := func(name string, deleting bool) *expiringsecretv1alpha1.Monitor {
+			m := testutils.GenerateMonitorService(
+				types.NamespacedName{Name: name, Namespace: MonitorNamespace}, TargetSecretName, Service)
+			m.Finalizers = []string{legacyFinalizer}
+			if deleting {
+				m.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 			}
+			return m
+		}
 
-			baseClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(monitor).Build()
-			reconciler := &MonitorReconciler{
-				Client: &errorClient{
-					Client:    baseClient,
-					updateErr: errors.New("update failed"),
-				},
-				Scheme: scheme,
-			}
+		It("cleans up metrics when the Monitor is gone", func() {
+			gone := testutils.GenerateMonitorService(
+				types.NamespacedName{Name: "m", Namespace: "ns"}, "s", Service)
+			gone.Status.State = expiringsecretv1alpha1.MonitorStateValid
+			gone.Status.ExpiresAt = &metav1.Time{Time: time.Now().Add(time.Hour)}
+			gone.Status.SecondsRemaining = pointerInt64(3600)
+			Expect(utils.NewMetric(gone).Update()).To(Succeed())
+			DeferCleanup(utils.NewMetric(gone).Cleanup)
 
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      monitor.Name,
-					Namespace: monitor.Namespace,
-				},
-			})
+			reconciler := &MonitorReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gone)})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(time.Second))
+
+			labels := prometheus.Labels{utils.LabelMonitorName: "m", utils.LabelMonitorNamespace: "ns"}
+			Expect(utils.SecretValidUntilTimestamp.DeletePartialMatch(labels)).To(BeZero())
+			Expect(utils.SecretSecondsUntilExpiry.DeletePartialMatch(labels)).To(BeZero())
+			Expect(utils.MonitorStateGauge.DeletePartialMatch(labels)).To(BeZero())
 		})
 
-		It("should skip deletion when finalizer is missing", func() {
-			monitor := &expiringsecretv1alpha1.Monitor{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       MonitorKind,
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "delete-monitor",
-					Namespace:         "default",
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
-				},
-				Spec: expiringsecretv1alpha1.MonitorSpec{
-					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name: TargetSecretName,
-					},
-					Service: Service,
-				},
-			}
+		It("strips the legacy finalizer", func() {
+			monitor := legacyMonitor("legacy-monitor", false)
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(monitor).WithStatusSubresource(monitor).Build()
+			reconciler := &MonitorReconciler{Client: c, Scheme: scheme}
+			DeferCleanup(utils.NewMetric(monitor).Cleanup)
 
-			baseClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-			reconciler := &MonitorReconciler{
-				Client: baseClient,
-				Scheme: scheme,
-			}
-
-			result, err := reconciler.handleDeletion(newReconcileState(ctx, monitor))
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(monitor)})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(BeZero())
+
+			found := &expiringsecretv1alpha1.Monitor{}
+			Expect(c.Get(ctx, client.ObjectKeyFromObject(monitor), found)).To(Succeed())
+			Expect(found.Finalizers).To(BeEmpty())
+			Expect(found.Status.State).NotTo(BeEmpty())
 		})
 
-		It("should return error when finalizer removal update fails", func() {
-			monitor := &expiringsecretv1alpha1.Monitor{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: expiringsecretv1alpha1.GroupVersion.String(),
-					Kind:       MonitorKind,
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "delete-monitor-error",
-					Namespace:         "default",
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
-				},
-				Spec: expiringsecretv1alpha1.MonitorSpec{
-					SecretRef: &expiringsecretv1alpha1.SecretReference{
-						Name: TargetSecretName,
-					},
-					Service: Service,
-				},
-			}
-			controllerutil.AddFinalizer(monitor, monitorFinalizer)
+		It("lets a deleting Monitor with the legacy finalizer go", func() {
+			monitor := legacyMonitor("leaving-monitor", true)
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(monitor).WithStatusSubresource(monitor).Build()
+			reconciler := &MonitorReconciler{Client: c, Scheme: scheme}
 
-			baseClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(monitor).WithStatusSubresource(monitor).Build()
-			reconciler := &MonitorReconciler{
-				Client: &errorClient{
-					Client:    baseClient,
-					updateErr: errors.New("delete update failed"),
-				},
-				Scheme: scheme,
-			}
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(monitor)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{}))
 
-			_, err := reconciler.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      monitor.Name,
-					Namespace: monitor.Namespace,
-				},
-			})
-			Expect(err).To(HaveOccurred())
+			err = c.Get(ctx, client.ObjectKeyFromObject(monitor), &expiringsecretv1alpha1.Monitor{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 
 		It("should return error on source lookup failure", func() {
@@ -1036,6 +894,48 @@ var _ = Describe("Monitor Controller", func() {
 		})
 	})
 
+	Context("Without a finalizer or spec write", func() {
+		It("never writes the spec", func() {
+			name := types.NamespacedName{Name: "spec-untouched", Namespace: MonitorNamespace}
+			monitor := testutils.GenerateMonitorService(name, "absent", Service)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+			DeferCleanup(func() {
+				utils.NewMetric(monitor).Cleanup()
+				Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+			})
+			Expect(monitor.Spec.AlertThresholds).To(Equal(&expiringsecretv1alpha1.AlertThresholds{
+				InfoDays: 30, WarningDays: 14, CriticalDays: 7}))
+			Expect(monitor.Generation).To(Equal(int64(1)))
+			before := monitor.Spec.DeepCopy()
+
+			_, err := (&MonitorReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}).
+				Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			found := &expiringsecretv1alpha1.Monitor{}
+			Expect(k8sClient.Get(ctx, name, found)).To(Succeed())
+			Expect(found.Generation).To(Equal(int64(1)))
+			Expect(found.ResourceVersion).NotTo(Equal(monitor.ResourceVersion))
+			Expect(found.Spec).To(Equal(*before))
+			Expect(found.Finalizers).To(BeEmpty())
+		})
+
+		It("deletes without the operator", func() {
+			name := types.NamespacedName{Name: "deletes-alone", Namespace: MonitorNamespace}
+			monitor := testutils.GenerateMonitorService(name, "absent", Service)
+			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+			DeferCleanup(utils.NewMetric(monitor).Cleanup)
+			_, err := (&MonitorReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}).
+				Reconcile(ctx, ctrl.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+			Eventually(func() bool {
+				return apierrors.IsNotFound(k8sClient.Get(ctx, name, &expiringsecretv1alpha1.Monitor{}))
+			}, 10*time.Second, 250*time.Millisecond).Should(BeTrue())
+		})
+	})
+
 	Context("When evaluating predicates", func() {
 		It("should return true for create and delete predicates", func() {
 			Expect(monitorCreatePredicate(event.CreateEvent{})).To(BeTrue())
@@ -1095,11 +995,7 @@ var _ = Describe("Monitor Controller", func() {
 
 			reconciler := newReconciler()
 			name := types.NamespacedName{Name: "metrics-monitor", Namespace: MonitorNamespace}
-			// First pass adds the finalizer and defaults; the second
-			// populates status, which is what the metrics are built from.
 			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
-			Expect(err).NotTo(HaveOccurred())
-			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(testutil.CollectAndCount(utils.SecretValidUntilTimestamp)).To(Equal(1))
@@ -1235,6 +1131,8 @@ var _ = Describe("Monitor Controller", func() {
 				Spec: expiringsecretv1alpha1.MonitorSpec{
 					SecretRef: &expiringsecretv1alpha1.SecretReference{Name: secret.Name},
 					Service:   Service,
+					// The fake client skips the CRD defaults.
+					AlertThresholds: &expiringsecretv1alpha1.AlertThresholds{InfoDays: 30, WarningDays: 14, CriticalDays: 7},
 				},
 			}
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret, monitor).
