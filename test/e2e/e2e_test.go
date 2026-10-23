@@ -88,6 +88,10 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			)
 		})
 
+		inState := func(st expiringsecretv1alpha1.MonitorState) func(*expiringsecretv1alpha1.Monitor) bool {
+			return func(m *expiringsecretv1alpha1.Monitor) bool { return m.Status.State == st }
+		}
+
 		It("should monitor a secret with a valid expiration date", func() {
 			By("creating a secret with future expiration date")
 			futureDate := time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02")
@@ -233,6 +237,33 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 				To(Equal(expiringsecretv1alpha1.MonitorStateError))
 			Expect(monitor.Status.Message).
 				To(Equal("Failed to get source Secret: referenced secret not found"))
+
+			By("creating the missing labelled secret")
+			Expect(k8sClient.Create(ctx, utils.GenerateValidDaysSecret(nsSecret, 365))).To(Succeed())
+
+			By("waiting for monitor to recover to Valid")
+			h.ExpectStatusEventually(nsMonitor, timeout, interval,
+				inState(expiringsecretv1alpha1.MonitorStateValid))
+		})
+
+		It("recovers when the validUntil label is added later", func() {
+			By("creating a secret without the label, then a monitor")
+			secret := utils.GeneratePayloadSecret(nsSecret, []byte("fake-registry-token"))
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, utils.GenerateMonitor(nsMonitor, nsSecret.Name))).To(Succeed())
+			h.ExpectStatusEventually(nsMonitor, timeout, interval,
+				inState(expiringsecretv1alpha1.MonitorStateError))
+
+			By("adding only the validUntil label")
+			Expect(k8sClient.Get(ctx, nsSecret, secret)).To(Succeed())
+			secret.Labels = map[string]string{
+				utils.ValidUntilLabel: time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02"),
+			}
+			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+			By("waiting for monitor to recover to Valid")
+			h.ExpectStatusEventually(nsMonitor, timeout, interval,
+				inState(expiringsecretv1alpha1.MonitorStateValid))
 		})
 
 		It("should handle critical threshold correctly", func() {
