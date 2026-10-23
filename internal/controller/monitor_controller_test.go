@@ -1154,21 +1154,6 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(monitorUpdatePredicate(event.UpdateEvent{ObjectOld: &corev1.Secret{}, ObjectNew: newMonitor})).To(BeFalse())
 			Expect(monitorUpdatePredicate(event.UpdateEvent{ObjectOld: oldMonitor, ObjectNew: &corev1.Secret{}})).To(BeFalse())
 		})
-
-		It("should evaluate secret update predicate", func() {
-			oldSecret := &corev1.Secret{Data: map[string][]byte{TokenKey: []byte("a")}}
-			newSecret := &corev1.Secret{Data: map[string][]byte{TokenKey: []byte("a")}}
-			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: newSecret})).To(BeFalse())
-
-			newSecret.Data["token"] = []byte("b")
-			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: newSecret})).To(BeTrue())
-
-			newSecret.Data = map[string][]byte{TokenKey: []byte("a"), "extra": []byte("c")}
-			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: newSecret})).To(BeTrue())
-
-			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: &expiringsecretv1alpha1.Monitor{}, ObjectNew: newSecret})).To(BeFalse())
-			Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: oldSecret, ObjectNew: &expiringsecretv1alpha1.Monitor{}})).To(BeFalse())
-		})
 	})
 
 	Context("Prometheus metrics", func() {

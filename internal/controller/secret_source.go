@@ -18,13 +18,15 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,22 +39,25 @@ import (
 // LabelKey is the Secret label holding the expiry date (YYYY-MM-DD).
 const LabelKey = "expiring-secrets.stakater.com/validUntil"
 
-func (r *MonitorReconciler) getSourceObject(s *reconcileState) (client.Object, error) {
+// errSecretNotFound reports that the referenced Secret does not exist.
+var errSecretNotFound = errors.New("referenced secret not found")
+
+// getSourceObject reads only the metadata of the referenced Secret, never its payload.
+func (r *MonitorReconciler) getSourceObject(s *reconcileState) (*metav1.PartialObjectMetadata, error) {
 	// A Monitor may only watch a Secret in its own namespace.
-	secret := &corev1.Secret{}
+	secret := &metav1.PartialObjectMetadata{}
+	secret.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Secret"))
 	secretKey := types.NamespacedName{
 		Name:      s.monitor.Spec.SecretRef.Name,
 		Namespace: s.monitor.Namespace,
 	}
 
-	err := r.Get(s.ctx, secretKey, secret)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("referenced secret not found")
+	if err := r.Get(s.ctx, secretKey, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, errSecretNotFound
 		}
 		return nil, err
 	}
-
 	return secret, nil
 }
 
@@ -159,25 +164,7 @@ func secretDeletePredicate(_ event.DeleteEvent) bool {
 	return true
 }
 
+// secretUpdatePredicate fires when the validUntil label changes.
 func secretUpdatePredicate(e event.UpdateEvent) bool {
-	// Reconcile if secret data changed
-	oldSecret, ok := e.ObjectOld.(*corev1.Secret)
-	if !ok {
-		return false
-	}
-	newSecret, ok := e.ObjectNew.(*corev1.Secret)
-	if !ok {
-		return false
-	}
-
-	// Check if data changed
-	if len(oldSecret.Data) != len(newSecret.Data) {
-		return true
-	}
-	for k, v := range oldSecret.Data {
-		if string(newSecret.Data[k]) != string(v) {
-			return true
-		}
-	}
-	return false
+	return e.ObjectOld.GetLabels()[LabelKey] != e.ObjectNew.GetLabels()[LabelKey]
 }
