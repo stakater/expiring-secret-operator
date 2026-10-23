@@ -102,6 +102,8 @@ memory use stays flat when many unrelated Secrets are created.
 
 ### S-02 Cross-namespace references expose Secret metadata (High)
 
+> Fixed in PR #50.
+
 **Where:** `monitor_controller.go` lines 246-268 (`getSourceObject`),
 271-308 (`parseSourceObject`, `availableLabels` at 285-290);
 `api/v1alpha1/monitor_types.go` lines 93-97 (`secretRef.namespace`);
