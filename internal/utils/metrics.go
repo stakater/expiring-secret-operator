@@ -23,6 +23,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	expiringsecretv1alpha1 "github.com/stakater/expiring-secret-operator/api/v1alpha1"
@@ -131,22 +133,15 @@ func (m *Metric) Labels() prometheus.Labels {
 	}
 
 	secretName := ""
-	secretNamespace := ""
 	if m.monitor.Spec.SecretRef != nil {
 		secretName = m.monitor.Spec.SecretRef.Name
-		secretNamespace = m.monitor.Spec.SecretRef.Namespace
-	}
-	// An empty secretRef namespace means the Monitor's own namespace, which
-	// is the same defaulting the reconciler applies when resolving it.
-	if secretNamespace == "" {
-		secretNamespace = m.monitor.Namespace
 	}
 
 	return prometheus.Labels{
 		LabelMonitorName:      m.monitor.Name,
 		LabelMonitorNamespace: m.monitor.Namespace,
 		LabelSecretName:       secretName,
-		LabelSecretNamespace:  secretNamespace,
+		LabelSecretNamespace:  m.monitor.Namespace,
 		LabelSecretService:    m.monitor.Spec.Service,
 	}
 }
@@ -161,20 +156,6 @@ func (m *Metric) StateLabels() prometheus.Labels {
 	return labels
 }
 
-// identityLabels scope a deletion to one Monitor, whatever its descriptive
-// labels currently say. Deleting by full label match is what allows orphans:
-// once a value has changed, the exact-match delete looks for the wrong
-// series and silently misses.
-func (m *Metric) identityLabels() prometheus.Labels {
-	if m == nil || m.monitor == nil {
-		return prometheus.Labels{}
-	}
-	return prometheus.Labels{
-		LabelMonitorName:      m.monitor.Name,
-		LabelMonitorNamespace: m.monitor.Namespace,
-	}
-}
-
 func (m *Metric) LabelValues() string {
 	metricLabels := m.Labels()
 	labelsString := make([]string, 0, len(metricLabels))
@@ -185,17 +166,24 @@ func (m *Metric) LabelValues() string {
 	return strings.Join(labelsString, ",")
 }
 
-// reset drops every series belonging to this Monitor and reports how many
-// were removed.
-func (m *Metric) reset() int {
-	identity := m.identityLabels()
-	if len(identity) == 0 {
-		return 0
+// CleanupMonitor drops every series belonging to the Monitor with this key
+// and reports how many were removed. It matches on identity labels only:
+// deleting by full label match is what allows orphans, because once a
+// descriptive value has changed the exact-match delete misses.
+func CleanupMonitor(key types.NamespacedName) int {
+	identity := prometheus.Labels{
+		LabelMonitorName:      key.Name,
+		LabelMonitorNamespace: key.Namespace,
 	}
 	deleted := SecretValidUntilTimestamp.DeletePartialMatch(identity)
 	deleted += SecretSecondsUntilExpiry.DeletePartialMatch(identity)
 	deleted += MonitorStateGauge.DeletePartialMatch(identity)
 	return deleted
+}
+
+// reset drops every series belonging to this Monitor.
+func (m *Metric) reset() int {
+	return CleanupMonitor(client.ObjectKeyFromObject(m.monitor))
 }
 
 func (m *Metric) Update() error {
@@ -261,7 +249,7 @@ func (m *Metric) SetError() error {
 	}
 	stateGauge.Set(1)
 
-	m.logger.Info("Published error state metric", "labels", labels)
+	m.logger.V(1).Info("Published error state metric", "labels", labels)
 	return nil
 }
 
@@ -271,5 +259,5 @@ func (m *Metric) Cleanup() {
 	}
 	deleted := m.reset()
 	m.logger.Info("Deleted metrics for Monitor",
-		"seriesDeleted", deleted, "labels", m.identityLabels())
+		"seriesDeleted", deleted, "monitor", client.ObjectKeyFromObject(m.monitor))
 }

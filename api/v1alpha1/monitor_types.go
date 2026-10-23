@@ -20,33 +20,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json:"-" or json:"foo" tags for the field to be exposed.
-
 type MonitorState string
 
 const (
 	// Secret is valid and not close to expiration
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	MonitorStateValid MonitorState = "Valid"
 	// Secret is valid but approaching expiration (e.g., between 30 and 14 days)
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	MonitorStateInfo MonitorState = "Info"
 	// Secret is valid but close to expiration (e.g., between 14 and 7 days)
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	MonitorStateWarning MonitorState = "Warning"
 	// Secret is valid but very close to expiration (e.g., less than 7 days)
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	MonitorStateCritical MonitorState = "Critical"
 	// Secret has expired
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	MonitorStateExpired MonitorState = "Expired"
 	// An error occurred while checking the secret (e.g., non-existent secret, API error)
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	MonitorStateError MonitorState = "Error"
-	// Something totally unknown happened (should be used very rarely, if at all)
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	MonitorStateUnknown MonitorState = "Unknown"
 )
 
 // MonitorConditionType represents the condition type for Monitor.
@@ -67,6 +55,8 @@ const (
 type MonitorSpec struct {
 	// Service that generated the secret content originally (e.g., docker.io, quay.io)
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Service that generated the secret content",xDescriptors="urn:alm:descriptor:com.tectonic.ui:text"
 	Service string `json:"service"`
 
@@ -76,29 +66,29 @@ type MonitorSpec struct {
 
 	// AlertThresholds defines when to trigger different alert levels
 	// +optional
+	// +kubebuilder:default={infoDays:30,warningDays:14,criticalDays:7}
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Alert Thresholds",xDescriptors="urn:alm:descriptor:com.tectonic.ui:advanced"
 	AlertThresholds *AlertThresholds `json:"alertThresholds,omitempty"`
 }
 
-// Reference to a Secret to monitor.
+// Reference to a Secret to monitor. The Secret is resolved in the namespace of
+// the Monitor.
 // It should contain a label with the expiration timestamp in "YYYY-MM-DD" format, e.g.:
 //
 //	expiring-secrets.stakater.com/validUntil: "2025-12-31"
 type SecretReference struct {
 	// Name is the name of the secret
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Name of the secret to monitor",xDescriptors="urn:alm:descriptor:io.kubernetes:Secret"
 	Name string `json:"name"`
-
-	// Namespace is the namespace of the secret
-	// If empty, defaults to the same namespace as the Monitor
-	// +optional
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Namespace of the secret to monitor",xDescriptors="urn:alm:descriptor:io.kubernetes:Namespace"
-	Namespace string `json:"namespace,omitempty"`
 }
 
 // Define the thresholds for different alert levels
 // +optional
+// +kubebuilder:validation:XValidation:rule="self.criticalDays < self.warningDays && self.warningDays < self.infoDays",message="alertThresholds must satisfy criticalDays < warningDays < infoDays"
 type AlertThresholds struct {
 	// InfoDays is the number of days before expiration to trigger info alerts
 	// +kubebuilder:validation:Minimum=1
@@ -159,10 +149,6 @@ type MonitorStatus struct {
 	// ObservedGeneration reflects the generation of the most recently observed monitor.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// LastSourceResourceVersion stores the last observed resourceVersion of the source Secret.
-	// +optional
-	LastSourceResourceVersion string `json:"lastSourceResourceVersion,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -179,7 +165,7 @@ type MonitorStatus struct {
 // +operator-sdk:csv:customresourcedefinitions:displayName="Expiring Secrets Monitor"
 // This annotation provides a hint for OLM which resources are managed by Monitor kind.
 // It's not mandatory to list all resources.
-// +operator-sdk:csv:customresourcedefinitions:resources={{Pod,v1,""},{Deployment,apps/v1,""},{ServiceAccount,v1,""},{Service,v1,""},{Secret,v1,""}}
+// +operator-sdk:csv:customresourcedefinitions:resources={{Secret,v1,""}}
 
 // Monitor is the Schema for the monitors API
 type Monitor struct {

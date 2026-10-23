@@ -107,7 +107,7 @@ func GenerateSecret(ns types.NamespacedName) *corev1.Secret {
 
 func GenerateFullMonitor(
 	ns types.NamespacedName,
-	secretRef types.NamespacedName,
+	secretName string,
 	service string,
 	alertThresholds *expiringsecretv1alpha1.AlertThresholds,
 ) *expiringsecretv1alpha1.Monitor {
@@ -119,8 +119,7 @@ func GenerateFullMonitor(
 		Spec: expiringsecretv1alpha1.MonitorSpec{
 			Service: service,
 			SecretRef: &expiringsecretv1alpha1.SecretReference{
-				Name:      secretRef.Name,
-				Namespace: secretRef.Namespace,
+				Name: secretName,
 			},
 			AlertThresholds: alertThresholds,
 		},
@@ -130,13 +129,13 @@ func GenerateFullMonitor(
 
 func GenerateMonitorService(
 	ns types.NamespacedName,
-	secretRef types.NamespacedName,
+	secretName string,
 	service string,
 ) *expiringsecretv1alpha1.Monitor {
-	return GenerateFullMonitor(ns, secretRef, service, nil)
+	return GenerateFullMonitor(ns, secretName, service, nil)
 }
 
-func GenerateMonitor(ns types.NamespacedName, secretRef types.NamespacedName) *expiringsecretv1alpha1.Monitor {
+func GenerateMonitor(ns types.NamespacedName, secretName string) *expiringsecretv1alpha1.Monitor {
 	services := []string{
 		"contoso.azurecr.io",
 		"mcr.microsoft.com",
@@ -151,7 +150,7 @@ func GenerateMonitor(ns types.NamespacedName, secretRef types.NamespacedName) *e
 		"harbor.mycompany.com",
 	}
 	service := services[rand.Intn(len(services))]
-	return GenerateFullMonitor(ns, secretRef, service, nil)
+	return GenerateFullMonitor(ns, secretName, service, nil)
 }
 
 // WaitForStatus waits until the specified condition is met for the given resource,

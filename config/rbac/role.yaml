@@ -17,19 +17,11 @@ rules:
   resources:
   - monitors
   verbs:
-  - create
-  - delete
   - get
   - list
   - patch
   - update
   - watch
-- apiGroups:
-  - expiring-secrets.stakater.com
-  resources:
-  - monitors/finalizers
-  verbs:
-  - update
 - apiGroups:
   - expiring-secrets.stakater.com
   resources:

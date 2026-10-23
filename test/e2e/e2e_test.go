@@ -30,6 +30,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,6 +39,65 @@ import (
 	internalutils "github.com/stakater/expiring-secret-operator/internal/utils"
 	"github.com/stakater/expiring-secret-operator/test/utils"
 )
+
+const (
+	projectName = "expiring-secret-operator"
+	namespace   = projectName + "-system"
+	svcName     = projectName + "-controller-manager-metrics-service"
+	crbName     = projectName + "-metrics-binding"
+	managerName = projectName + "-controller-manager"
+)
+
+// runCurlPod runs command in a throwaway curl pod and returns its logs.
+func runCurlPod(namespace, command string) string {
+	By("running curl pod")
+	// Run pod without -it flags for CI compatibility
+	_, err := utils.Run(exec.Command("kubectl", "run", "curl-metrics",
+		"--restart=Never", "--image=curlimages/curl:7.87.0", "-n", namespace,
+		"--", "/bin/sh", "-c", command))
+	Expect(err).NotTo(HaveOccurred())
+
+	By("waiting for curl pod to complete")
+	_, _ = utils.Run(exec.Command("kubectl", "wait",
+		"--for=jsonpath={.status.phase}=Succeeded", "pod/curl-metrics",
+		"-n", namespace, "--timeout=30s"))
+
+	By("retrieving logs from curl pod")
+	output, err := utils.Run(exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(output).NotTo(BeEmpty())
+
+	By("deleting curl pod")
+	_, _ = utils.Run(exec.Command("kubectl", "delete", "pod", "curl-metrics",
+		"-n", namespace, "--ignore-not-found=true"))
+	return string(output)
+}
+
+// ensureMetricsAccess creates the metrics-reader binding and returns a token.
+func ensureMetricsAccess() string {
+	By("creating cluster role binding for metrics access")
+	_, err := utils.Run(exec.Command("kubectl", "create", "clusterrolebinding", crbName,
+		fmt.Sprintf("--clusterrole=%s-metrics-reader", projectName),
+		fmt.Sprintf("--serviceaccount=%s:%s", namespace, managerName)))
+	if err != nil {
+		Expect(err.Error()).To(ContainSubstring("already exists"))
+	}
+
+	By("creating serviceaccount token for authentication")
+	token, err := utils.Run(exec.Command("kubectl", "create", "token", managerName,
+		"-n", namespace, "--duration=10m"))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(token).NotTo(BeEmpty())
+	return string(token)
+}
+
+// fetchMetrics returns the controller's /metrics body.
+func fetchMetrics() string {
+	token := ensureMetricsAccess()
+	return runCurlPod(namespace, fmt.Sprintf(
+		"curl -k -H \"Authorization: Bearer %s\" https://%s.%s.svc.cluster.local:8443/metrics",
+		token, svcName, namespace))
+}
 
 var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 	const (
@@ -87,6 +147,14 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			)
 		})
 
+		// Must stay below the controller's one-minute re-check so recovery specs
+		// prove the watch, not the poll.
+		const watchTimeout = 30 * time.Second
+
+		inState := func(st expiringsecretv1alpha1.MonitorState) func(*expiringsecretv1alpha1.Monitor) bool {
+			return func(m *expiringsecretv1alpha1.Monitor) bool { return m.Status.State == st }
+		}
+
 		It("should monitor a secret with a valid expiration date", func() {
 			By("creating a secret with future expiration date")
 			futureDate := time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02")
@@ -95,7 +163,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			log.Info("Created secret with valid expiration date", "secret", nsSecret, "validUntil", futureDate)
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 			log.Info("Created monitor resource", "monitor", monitor)
 
@@ -123,7 +191,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			monitor = &expiringsecretv1alpha1.Monitor{}
@@ -160,7 +228,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			//Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 			err := k8sClient.Create(ctx, monitor)
 			if err != nil {
@@ -195,7 +263,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect expired state")
@@ -215,7 +283,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 
 		It("should handle missing secrets gracefully", func() {
 			By("creating a monitor resource referencing non-existent secret")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect error state")
@@ -232,6 +300,34 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 				To(Equal(expiringsecretv1alpha1.MonitorStateError))
 			Expect(monitor.Status.Message).
 				To(Equal("Failed to get source Secret: referenced secret not found"))
+
+			By("creating the missing labelled secret")
+			Expect(k8sClient.Create(ctx, utils.GenerateValidDaysSecret(nsSecret, 365))).To(Succeed())
+
+			By("waiting for monitor to recover to Valid")
+			h.ExpectStatusEventually(nsMonitor, watchTimeout, interval,
+				inState(expiringsecretv1alpha1.MonitorStateValid))
+		})
+
+		It("recovers when the validUntil label is added later", func() {
+			By("creating a secret without the label, then a monitor")
+			secret := utils.GeneratePayloadSecret(nsSecret, []byte("fake-registry-token"))
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, utils.GenerateMonitor(nsMonitor, nsSecret.Name))).To(Succeed())
+			h.ExpectStatusEventually(nsMonitor, timeout, interval,
+				inState(expiringsecretv1alpha1.MonitorStateError))
+
+			By("adding only the validUntil label")
+			Expect(k8sClient.Get(ctx, nsSecret, secret)).To(Succeed())
+			if secret.Labels == nil {
+				secret.Labels = map[string]string{}
+			}
+			secret.Labels[utils.ValidUntilLabel] = time.Now().Add(365 * 24 * time.Hour).Format("2006-01-02")
+			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+			By("waiting for monitor to recover to Valid")
+			h.ExpectStatusEventually(nsMonitor, watchTimeout, interval,
+				inState(expiringsecretv1alpha1.MonitorStateValid))
 		})
 
 		It("should handle critical threshold correctly", func() {
@@ -241,7 +337,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect critical state")
@@ -265,7 +361,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect warning state")
@@ -286,7 +382,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 		})
 	})
 
-	Context("Monitor Resource Functionality Cross-Namespace", func() {
+	Context("Monitor cannot see Secrets in other namespaces", func() {
 		monitorNamespace := "e2e-test"
 		secretNamespace := "secret-ns"
 
@@ -324,47 +420,39 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			_ = k8sClient.Delete(ctx, monitorNS)
 		})
 
-		It("should handle cross-namespace secret references", func() {
+		It("should report SourceNotAvailable for a Secret in another namespace", func() {
 			nsSecret := h.NsName("cross-ns-secret", secretNamespace)
 			nsMonitor := h.NsName("test-monitor-cross-ns", monitorNamespace)
 
-			By("creating secret in different namespace")
+			By("creating secret in a different namespace")
 			futureDate := time.Now().Add(25 * 24 * time.Hour).Format("2006-01-02")
 			secret := utils.GenerateFullSecret(nsSecret, futureDate, []byte("cross-namespace-token"))
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-			By("creating monitor that references cross-namespace secret")
-			monitor := utils.GenerateMonitor(nsMonitor, nsSecret)
+			By("creating monitor that names the same Secret in its own namespace")
+			monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
-			By("waiting for monitor to process cross-namespace secret")
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, nsMonitor, monitor)
-				if err != nil {
-					return false
+			By("waiting for the monitor to report an error")
+			Eventually(func() expiringsecretv1alpha1.MonitorState {
+				if err := k8sClient.Get(ctx, nsMonitor, monitor); err != nil {
+					return ""
 				}
-				return monitor.Status.State == expiringsecretv1alpha1.MonitorStateInfo &&
-					monitor.Status.ExpiresAt != nil
-			}, timeout, interval).Should(BeTrue())
+				return monitor.Status.State
+			}, timeout, interval).Should(Equal(expiringsecretv1alpha1.MonitorStateError))
 
-			err := k8sClient.Get(ctx, nsMonitor, monitor)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(string(monitor.Status.State)).To(Equal(string(expiringsecretv1alpha1.MonitorStateInfo)))
-			Expect(monitor.Status.Message).To(
-				Equal(fmt.Sprintf("Secret expires in less than %d days", monitor.Spec.AlertThresholds.InfoDays)))
-			Expect(*monitor.Status.SecondsRemaining).To(BeNumerically(">", 0))
+			Expect(monitor.Status.ExpiresAt).To(BeNil())
+			cond := apimeta.FindStatusCondition(monitor.Status.Conditions,
+				string(expiringsecretv1alpha1.MonitorConditionSourceAvailable))
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal("SourceNotAvailable"))
 		})
 	})
 
 	Context("Prometheus Metrics", func() {
 		var (
 			testNamespace = "test-e2e-metrics"
-			projectName   = "expiring-secret-operator"
-			namespace     = fmt.Sprintf("%s-system", projectName)
-			svcName       = fmt.Sprintf("%s-controller-manager-metrics-service", projectName)
-			crbName       = fmt.Sprintf("%s-metrics-binding", projectName)
-			managerName   = fmt.Sprintf("%s-controller-manager", projectName)
 
 			validSecret    types.NamespacedName
 			validMonitor   types.NamespacedName
@@ -406,7 +494,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource")
-			monitor := utils.GenerateMonitor(validMonitor, validSecret)
+			monitor := utils.GenerateMonitor(validMonitor, validSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor status to be updated")
@@ -427,7 +515,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 			By("creating a monitor resource for secret with past expiration date")
-			monitor = utils.GenerateMonitor(expiredMonitor, expiredSecret)
+			monitor = utils.GenerateMonitor(expiredMonitor, expiredSecret.Name)
 			Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
 
 			By("waiting for monitor to detect expired state")
@@ -456,81 +544,16 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			}, timeout, interval).Should(BeTrue())
 		})
 
-		curl := func(url string) []byte {
-			By("running curl pod to fetch metrics")
-			// Run pod without -it flags for CI compatibility
-			cmd := exec.Command("kubectl", "run", "curl-metrics",
-				"--restart=Never",
-				"--image=curlimages/curl:7.87.0",
-				"-n", namespace,
-				"--", "/bin/sh", "-c",
-				url,
-			)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Wait for pod to complete (either Succeeded or Failed)
-			By("waiting for curl pod to complete")
-			cmd = exec.Command("kubectl", "wait",
-				"--for=jsonpath={.status.phase}=Succeeded",
-				"pod/curl-metrics",
-				"-n", namespace,
-				"--timeout=30s",
-			)
-			_, _ = utils.Run(cmd)
-
-			// Get logs from the pod
-			By("retrieving logs from curl pod")
-			cmd = exec.Command("kubectl", "logs", "curl-metrics",
-				"-n", namespace,
-			)
-			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).NotTo(BeEmpty())
-
-			// Delete the pod
-			By("deleting curl pod")
-			cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics",
-				"-n", namespace,
-				"--ignore-not-found=true",
-			)
-			_, _ = utils.Run(cmd)
-
-			return output
-		}
-
 		It("should expose metrics endpoint", func() {
-			By("creating cluster role binding for metrics access")
-			cmd := exec.Command("kubectl", "create", "clusterrolebinding",
-				crbName,
-				fmt.Sprintf("--clusterrole=%s-metrics-reader", projectName),
-				fmt.Sprintf("--serviceaccount=%s:%s-controller-manager", namespace, projectName),
-			)
-			_, _ = utils.Run(cmd)
-
-			By("creating serviceaccount token for authentication")
-			cmd = exec.Command("kubectl", "create", "token", managerName,
-				"-n", namespace,
-				"--duration=10m",
-			)
-			token, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(token).NotTo(BeEmpty())
-
-			By("curling metrics endpoint using serviceaccount token")
-			curlCommand := fmt.Sprintf("curl -k -H \"Authorization: Bearer %s\" "+
-				"https://%s.%s.svc.cluster.local:8443/metrics",
-				string(token), svcName, namespace)
-
-			output := curl(curlCommand)
+			output := fetchMetrics()
 
 			dir, err := os.Getwd()
 			Expect(err).NotTo(HaveOccurred())
 			file := filepath.Join(dir, "metrics_output.txt")
-			writeErr := os.WriteFile(file, output, 0644)
+			writeErr := os.WriteFile(file, []byte(output), 0644)
 			Expect(writeErr).NotTo(HaveOccurred())
 
-			outputStr := string(output)
+			outputStr := output
 
 			By("verifying that metrics output contains expected metric " + validUntilMetricName)
 			Expect(outputStr).To(
@@ -561,10 +584,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 			// Cleanup created resources
 
 			By("removing cluster role binding for metrics access")
-			cmd = exec.Command("kubectl", "delete", "clusterrolebinding",
-				crbName,
-			)
-			_, err = utils.Run(cmd)
+			_, err = utils.Run(exec.Command("kubectl", "delete", "clusterrolebinding", crbName))
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -600,7 +620,7 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 				`curl -s "http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/query?query=%s"`,
 				url.QueryEscape(query))
 
-			output := curl(curlCommand)
+			output := []byte(runCurlPod(namespace, curlCommand))
 
 			By("verifying the target was actually scraped successfully (up == 1)")
 			// The instant-query API returns the same "value" shape whether
@@ -618,5 +638,76 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 				"expected up==1 (target successfully scraped), got up==%s; full response: %s",
 				matches[1], string(output))
 		})
+	})
+})
+
+// kubectl runs kubectl and fails the spec on error.
+func kubectl(args ...string) {
+	_, err := utils.Run(exec.Command("kubectl", args...))
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func scaleOperator(replicas int) {
+	kubectl("-n", namespace, "scale", "deploy/"+managerName,
+		fmt.Sprintf("--replicas=%d", replicas))
+}
+
+func waitOperatorPodsGone() {
+	Eventually(func() int {
+		pods := &corev1.PodList{}
+		_ = k8sClient.List(ctx, pods, client.InNamespace(namespace),
+			client.MatchingLabels{"control-plane": "controller-manager"})
+		return len(pods.Items)
+	}, 90*time.Second, 2*time.Second).Should(BeZero())
+}
+
+func restoreOperator() {
+	scaleOperator(1)
+	kubectl("-n", namespace, "rollout", "status", "deploy/"+managerName, "--timeout=120s")
+}
+
+func deleteNamespaceAndWait(name string) {
+	_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})
+	Eventually(func() bool {
+		return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: name}, &corev1.Namespace{}))
+	}, 120*time.Second, 2*time.Second).Should(BeTrue())
+}
+
+var _ = Describe("Monitor deletion without the operator", Ordered, func() {
+	It("can be deleted while the operator is down", func() {
+		const testNS = "e2e-operator-down"
+		h := utils.NewHelper(ctx, k8sClient)
+		nsSecret := h.NsName("down-secret", testNS)
+		nsMonitor := h.NsName("down-monitor", testNS)
+		DeferCleanup(deleteNamespaceAndWait, testNS)
+		h.VerifyNamespaces(nsSecret, nsMonitor)
+
+		Expect(k8sClient.Create(ctx, utils.GenerateValidDaysSecret(nsSecret, 365))).To(Succeed())
+		monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
+		Expect(k8sClient.Create(ctx, monitor)).To(Succeed())
+		Eventually(func() expiringsecretv1alpha1.MonitorState {
+			_ = k8sClient.Get(ctx, nsMonitor, monitor)
+			return monitor.Status.State
+		}, 120*time.Second, 2*time.Second).Should(Equal(expiringsecretv1alpha1.MonitorStateValid))
+
+		By("stopping the operator")
+		scaleOperator(0)
+		DeferCleanup(restoreOperator) // runs on failure too; idempotent
+		waitOperatorPodsGone()
+
+		By("deleting the Monitor with no operator running")
+		Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
+		Eventually(func() bool {
+			return apierrors.IsNotFound(k8sClient.Get(ctx, nsMonitor, &expiringsecretv1alpha1.Monitor{}))
+		}, 30*time.Second, time.Second).Should(BeTrue())
+
+		By("restarting the operator")
+		restoreOperator()
+
+		// Smoke check only: the restarted operator re-lists Monitors and
+		// publishes no series for the deleted one. The real proof is that
+		// Delete completed with no operator running; not-found cleanup is
+		// covered by unit tests.
+		Expect(fetchMetrics()).NotTo(ContainSubstring(fmt.Sprintf("monitor_name=%q", nsMonitor.Name)))
 	})
 })
