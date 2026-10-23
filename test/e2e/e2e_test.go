@@ -80,7 +80,7 @@ func ensureMetricsAccess() string {
 		fmt.Sprintf("--clusterrole=%s-metrics-reader", projectName),
 		fmt.Sprintf("--serviceaccount=%s:%s", namespace, managerName)))
 	if err != nil {
-		Expect(err.Error()).To(ContainSubstring("AlreadyExists"))
+		Expect(err.Error()).To(ContainSubstring("already exists"))
 	}
 
 	By("creating serviceaccount token for authentication")
@@ -641,16 +641,46 @@ var _ = Describe("Expiring Secrets Operator E2E", Ordered, func() {
 	})
 })
 
+// kubectl runs kubectl and fails the spec on error.
+func kubectl(args ...string) {
+	_, err := utils.Run(exec.Command("kubectl", args...))
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func scaleOperator(replicas int) {
+	kubectl("-n", namespace, "scale", "deploy/"+managerName,
+		fmt.Sprintf("--replicas=%d", replicas))
+}
+
+func waitOperatorPodsGone() {
+	Eventually(func() int {
+		pods := &corev1.PodList{}
+		_ = k8sClient.List(ctx, pods, client.InNamespace(namespace),
+			client.MatchingLabels{"control-plane": "controller-manager"})
+		return len(pods.Items)
+	}, 90*time.Second, 2*time.Second).Should(BeZero())
+}
+
+func restoreOperator() {
+	scaleOperator(1)
+	kubectl("-n", namespace, "rollout", "status", "deploy/"+managerName, "--timeout=120s")
+}
+
+func deleteNamespaceAndWait(name string) {
+	_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})
+	Eventually(func() bool {
+		return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: name}, &corev1.Namespace{}))
+	}, 120*time.Second, 2*time.Second).Should(BeTrue())
+}
+
 var _ = Describe("Monitor deletion without the operator", Ordered, func() {
 	It("can be deleted while the operator is down", func() {
+		const testNS = "e2e-operator-down"
 		h := utils.NewHelper(ctx, k8sClient)
-		nsSecret := h.NsName("down-secret", "e2e-operator-down")
-		nsMonitor := h.NsName("down-monitor", "e2e-operator-down")
+		nsSecret := h.NsName("down-secret", testNS)
+		nsMonitor := h.NsName("down-monitor", testNS)
+		DeferCleanup(deleteNamespaceAndWait, testNS)
 		h.VerifyNamespaces(nsSecret, nsMonitor)
-		kubectl := func(args ...string) {
-			_, err := utils.Run(exec.Command("kubectl", args...))
-			Expect(err).NotTo(HaveOccurred())
-		}
 
 		Expect(k8sClient.Create(ctx, utils.GenerateValidDaysSecret(nsSecret, 365))).To(Succeed())
 		monitor := utils.GenerateMonitor(nsMonitor, nsSecret.Name)
@@ -661,9 +691,9 @@ var _ = Describe("Monitor deletion without the operator", Ordered, func() {
 		}, 120*time.Second, 2*time.Second).Should(Equal(expiringsecretv1alpha1.MonitorStateValid))
 
 		By("stopping the operator")
-		kubectl("-n", namespace, "scale", "deploy/"+managerName, "--replicas=0")
-		kubectl("wait", "--for=delete", "pod", "-l", "control-plane=controller-manager",
-			"-n", namespace, "--timeout=90s")
+		scaleOperator(0)
+		DeferCleanup(restoreOperator) // runs on failure too; idempotent
+		waitOperatorPodsGone()
 
 		By("deleting the Monitor with no operator running")
 		Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
@@ -672,10 +702,12 @@ var _ = Describe("Monitor deletion without the operator", Ordered, func() {
 		}, 30*time.Second, time.Second).Should(BeTrue())
 
 		By("restarting the operator")
-		kubectl("-n", namespace, "scale", "deploy/"+managerName, "--replicas=1")
-		kubectl("-n", namespace, "rollout", "status", "deploy/"+managerName, "--timeout=120s")
+		restoreOperator()
 
-		By("checking the deleted Monitor's series are gone")
+		// Smoke check only: the restarted operator re-lists Monitors and
+		// publishes no series for the deleted one. The real proof is that
+		// Delete completed with no operator running; not-found cleanup is
+		// covered by unit tests.
 		Expect(fetchMetrics()).NotTo(ContainSubstring(fmt.Sprintf("monitor_name=%q", nsMonitor.Name)))
 	})
 })
