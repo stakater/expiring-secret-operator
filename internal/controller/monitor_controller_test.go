@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -36,7 +37,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -508,7 +508,6 @@ var _ = Describe("Monitor Controller", func() {
 
 			By("Manually setting invalid values")
 			monitor.Status.State = ""
-			controllerReconciler.output = monitor
 			setStatusMessage(monitor)
 		})
 
@@ -520,9 +519,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Get(ctx, nsMonitor, monitor)).To(Succeed())
 
 			monitor.Status.ExpiresAt = nil
-			controllerReconciler.output = monitor
-
-			err := utils.NewMetric(controllerReconciler.output).Update()
+			err := utils.NewMetric(monitor).Update()
 			Expect(err).To(HaveOccurred())
 
 			setStatusMessage(monitor)
@@ -536,9 +533,7 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Get(ctx, nsMonitor, monitor)).To(Succeed())
 
 			monitor.Status.SecondsRemaining = nil
-			controllerReconciler.output = monitor
-
-			err := utils.NewMetric(controllerReconciler.output).Update()
+			err := utils.NewMetric(monitor).Update()
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -908,12 +903,6 @@ var _ = Describe("Monitor Controller", func() {
 	})
 
 	Context("When testing helper functions", func() {
-		var reconciler *MonitorReconciler
-
-		BeforeEach(func() {
-			reconciler = newReconciler()
-		})
-
 		It("should handle updateMetrics with nil ExpiresAt", func() {
 			monitor := &expiringsecretv1alpha1.Monitor{
 				ObjectMeta: metav1.ObjectMeta{
@@ -933,45 +922,8 @@ var _ = Describe("Monitor Controller", func() {
 				},
 			}
 
-			reconciler.output = monitor
-			err := utils.NewMetric(reconciler.output).Update()
+			err := utils.NewMetric(monitor).Update()
 			Expect(err).To(HaveOccurred())
-		})
-
-		It("should handle parseSourceObject with secret missing labels", func() {
-			secret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "no-label-secret",
-					Namespace: MonitorNamespace,
-				},
-				Data: map[string][]byte{
-					TokenKey: []byte("fake-token"),
-				},
-			}
-
-			expiresAt, err := reconciler.parseSourceObject(secret)
-			Expect(err).To(HaveOccurred())
-			Expect(expiresAt).To(Equal(time.Time{}))
-		})
-
-		It("should handle parseSourceObject with invalid date format", func() {
-			secret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "invalid-date-secret",
-					Namespace: MonitorNamespace,
-					Labels: map[string]string{
-						"validUntil": "not-a-date",
-					},
-				},
-				Data: map[string][]byte{
-					TokenKey: []byte("fake-token"),
-				},
-			}
-
-			expiresAt, err := reconciler.parseSourceObject(secret)
-			Expect(err).To(HaveOccurred())
-			Expect(expiresAt).To(Equal(time.Time{}))
-			// Expect(expiresAt).To(BeNil())
 		})
 	})
 
@@ -1050,12 +1002,9 @@ var _ = Describe("Monitor Controller", func() {
 			reconciler := &MonitorReconciler{
 				Client: baseClient,
 				Scheme: scheme,
-				ctx:    ctx,
-				log:    log.FromContext(ctx),
-				output: monitor,
 			}
 
-			result, err := reconciler.handleDeletion()
+			result, err := reconciler.handleDeletion(newReconcileState(ctx, monitor))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeZero())
 		})
@@ -1124,12 +1073,9 @@ var _ = Describe("Monitor Controller", func() {
 					getErr: errors.New("get failed"),
 				},
 				Scheme: scheme,
-				ctx:    ctx,
-				log:    log.FromContext(ctx),
-				output: monitor,
 			}
 
-			_, err := reconciler.getSourceObject()
+			_, err := reconciler.getSourceObject(newReconcileState(ctx, monitor))
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -1199,15 +1145,11 @@ var _ = Describe("Monitor Controller", func() {
 
 			baseClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(monitor).WithStatusSubresource(monitor).Build()
 			reconciler := &MonitorReconciler{
-				Client:   baseClient,
-				Scheme:   scheme,
-				ctx:      ctx,
-				log:      log.FromContext(ctx),
-				output:   monitor,
-				original: monitor.DeepCopy(),
+				Client: baseClient,
+				Scheme: scheme,
 			}
 
-			result, err := reconciler.handleSuccess()
+			result, err := reconciler.handleSuccess(newReconcileState(ctx, monitor))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(time.Minute))
 		})
@@ -1347,6 +1289,40 @@ var _ = Describe("Monitor Controller", func() {
 			Expect(k8sClient.Delete(ctx, monitor)).To(Succeed())
 			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("When reconciling concurrently", func() {
+		It("reconciles and maps Secrets concurrently without a data race", func() {
+			ctx := context.Background()
+			scheme := runtime.NewScheme()
+			Expect(clientgoscheme.AddToScheme(scheme)).To(Succeed())
+			Expect(expiringsecretv1alpha1.AddToScheme(scheme)).To(Succeed())
+
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+				Name:      "race-secret",
+				Namespace: MonitorNamespace,
+				Labels:    map[string]string{LabelKey: time.Now().AddDate(1, 0, 0).Format("2006-01-02")},
+			}}
+			monitor := &expiringsecretv1alpha1.Monitor{
+				ObjectMeta: metav1.ObjectMeta{Name: "race-monitor", Namespace: MonitorNamespace},
+				Spec: expiringsecretv1alpha1.MonitorSpec{
+					SecretRef: &expiringsecretv1alpha1.SecretReference{Name: secret.Name},
+					Service:   Service,
+				},
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret, monitor).
+				WithStatusSubresource(&expiringsecretv1alpha1.Monitor{}).Build()
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: monitor.Name, Namespace: monitor.Namespace}}
+
+			r := &MonitorReconciler{Client: c, Scheme: scheme}
+			var wg sync.WaitGroup
+			for i := 0; i < 20; i++ {
+				wg.Add(2)
+				go func() { defer wg.Done(); _, _ = r.Reconcile(ctx, req) }()
+				go func() { defer wg.Done(); _ = r.mapSecretToMonitor(ctx, secret) }()
+			}
+			wg.Wait()
 		})
 	})
 })

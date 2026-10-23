@@ -18,20 +18,16 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -40,22 +36,28 @@ import (
 	"github.com/stakater/expiring-secret-operator/internal/utils"
 )
 
-// MonitorReconciler reconciles a Monitor object
+// MonitorReconciler reconciles a Monitor object. It holds no per-request
+// state, so Reconcile and the Secret mapper may run concurrently.
 type MonitorReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+}
 
-	ctx context.Context
-	log logr.Logger
-
-	output *expiringsecretv1alpha1.Monitor
+// reconcileState carries everything one reconcile needs.
+type reconcileState struct {
+	ctx     context.Context
+	log     logr.Logger
+	monitor *expiringsecretv1alpha1.Monitor
 	// original holds a deep copy used for status patching
 	original *expiringsecretv1alpha1.Monitor
 }
 
+func newReconcileState(ctx context.Context, m *expiringsecretv1alpha1.Monitor) *reconcileState {
+	return &reconcileState{ctx: ctx, log: log.FromContext(ctx), monitor: m, original: m.DeepCopy()}
+}
+
 const (
 	monitorFinalizer        = "expiring-secrets.stakater.com/monitor-finalizer"
-	LabelKey                = "expiring-secrets.stakater.com/validUntil"
 	sourceLabelNotAvailable = "sourceLabelNotAvailable"
 )
 
@@ -73,96 +75,99 @@ func (e *MonitorErrorReasonMessage) Error() string { return e.Message }
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// func (r *MonitorReconciler) Reconcile(ctx context.Context, req *expiringsecretv1alpha1.Monitor) (ctrl.Result, error) {
 func (r *MonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	r.ctx = ctx
-	r.log = log.FromContext(ctx)
+	log.FromContext(ctx).Info("Reconciling Monitor", "namespace", req.Namespace, "name", req.Name)
 
-	r.log.Info("Reconciling Monitor", "namespace", req.Namespace, "name", req.Name)
-
-	r.output = &expiringsecretv1alpha1.Monitor{}
-	if err := r.Get(ctx, req.NamespacedName, r.output); err != nil {
+	monitor := &expiringsecretv1alpha1.Monitor{}
+	if err := r.Get(ctx, req.NamespacedName, monitor); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
-	r.original = r.output.DeepCopy()
-
-	// Handle deletion
-	r.log.Info("Is deleted?", "res", r.output.DeletionTimestamp)
-	if r.output.DeletionTimestamp != nil {
-		r.log.Info("Handling deletion of Monitor", "namespace", req.Namespace, "name", req.Name)
-		return r.handleDeletion()
-	}
-
-	// Ensure finalizer and default alert thresholds in a single update
-	needsUpdate := false
-
-	if !controllerutil.ContainsFinalizer(r.output, monitorFinalizer) {
-		r.log.Info("Adding finalizer to Monitor", "namespace", req.Namespace, "name", req.Name)
-		controllerutil.AddFinalizer(r.output, monitorFinalizer)
-		needsUpdate = true
-	}
-
-	if applyDefaultAlertThresholds(r.output) {
-		r.log.Info("Applying default alert thresholds to Monitor", "namespace", req.Namespace, "name", req.Name)
-		needsUpdate = true
-	}
-
-	if needsUpdate {
-		if err := r.Update(r.ctx, r.output); err != nil {
-			r.log.Info("Conflict updating Monitor spec, requeueing", "error", err)
-			return ctrl.Result{RequeueAfter: time.Second}, nil
-		}
-		// Re-fetch after spec update to work with latest version
-		r.output = &expiringsecretv1alpha1.Monitor{}
-		if err := r.Get(ctx, req.NamespacedName, r.output); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
-	// Resolve and load source object
-	sourceObj, err := r.getSourceObject()
-	if err != nil {
-		r.log.Error(err, "Failed to get source Secret", "reference", r.output.Spec.SecretRef)
-		return r.handleError(err, "SourceNotAvailable", "Failed to get source Secret")
-	}
-
-	validUntil, parseErr := r.parseSourceObject(sourceObj)
-	if parseErr != nil {
-		r.log.Error(parseErr, "Failed to parse source Secret", "reference", r.output.Spec.SecretRef)
-		return r.handleError(parseErr, parseErr.Reason, parseErr.Message)
-	}
-
-	// Determine the current state based on thresholds
-	calculateState(r.output, validUntil, time.Now())
-
-	// Generate a user-friendly status message
-	setStatusMessage(r.output)
-
-	r.output.Status.ObservedGeneration = r.output.Generation
-	r.output.Status.LastSourceResourceVersion = sourceObj.GetResourceVersion()
-
-	return r.handleSuccess()
+	return r.reconcileMonitor(newReconcileState(ctx, monitor), req)
 }
 
-func (r *MonitorReconciler) handleSuccess() (ctrl.Result, error) {
+func (r *MonitorReconciler) reconcileMonitor(s *reconcileState, req ctrl.Request) (ctrl.Result, error) {
+	s.log.Info("Is deleted?", "res", s.monitor.DeletionTimestamp)
+	if s.monitor.DeletionTimestamp != nil {
+		s.log.Info("Handling deletion of Monitor", "namespace", req.Namespace, "name", req.Name)
+		return r.handleDeletion(s)
+	}
+
+	requeue, err := r.ensureFinalizerAndDefaults(s, req)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if requeue {
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+	return r.observeSource(s)
+}
+
+// ensureFinalizerAndDefaults adds the finalizer and default alert thresholds
+// in a single update. It reports whether the update failed and should be
+// requeued.
+func (r *MonitorReconciler) ensureFinalizerAndDefaults(s *reconcileState, req ctrl.Request) (bool, error) {
+	needsUpdate := false
+	if !controllerutil.ContainsFinalizer(s.monitor, monitorFinalizer) {
+		s.log.Info("Adding finalizer to Monitor", "namespace", req.Namespace, "name", req.Name)
+		controllerutil.AddFinalizer(s.monitor, monitorFinalizer)
+		needsUpdate = true
+	}
+	if applyDefaultAlertThresholds(s.monitor) {
+		s.log.Info("Applying default alert thresholds to Monitor", "namespace", req.Namespace, "name", req.Name)
+		needsUpdate = true
+	}
+	if !needsUpdate {
+		return false, nil
+	}
+	if err := r.Update(s.ctx, s.monitor); err != nil {
+		s.log.Info("Conflict updating Monitor spec, requeueing", "error", err)
+		return true, nil
+	}
+	// Re-fetch after spec update to work with latest version
+	s.monitor = &expiringsecretv1alpha1.Monitor{}
+	return false, r.Get(s.ctx, req.NamespacedName, s.monitor)
+}
+
+// observeSource reads the source Secret and records its expiry in the status.
+func (r *MonitorReconciler) observeSource(s *reconcileState) (ctrl.Result, error) {
+	sourceObj, err := r.getSourceObject(s)
+	if err != nil {
+		s.log.Error(err, "Failed to get source Secret", "reference", s.monitor.Spec.SecretRef)
+		return r.handleError(s, err, "SourceNotAvailable", "Failed to get source Secret")
+	}
+
+	validUntil, parseErr := parseValidUntil(s.log, sourceObj)
+	if parseErr != nil {
+		s.log.Error(parseErr, "Failed to parse source Secret", "reference", s.monitor.Spec.SecretRef)
+		return r.handleError(s, parseErr, parseErr.Reason, parseErr.Message)
+	}
+
+	calculateState(s.monitor, validUntil, time.Now())
+	setStatusMessage(s.monitor)
+	s.monitor.Status.ObservedGeneration = s.monitor.Generation
+	s.monitor.Status.LastSourceResourceVersion = sourceObj.GetResourceVersion()
+	return r.handleSuccess(s)
+}
+
+func (r *MonitorReconciler) handleSuccess(s *reconcileState) (ctrl.Result, error) {
 	// Update Prometheus metrics now that status is fully populated
-	if err := utils.NewMetric(r.output).Update(); err != nil {
-		r.log.Error(err, "Failed to update metrics", "monitor", r.output.Name)
+	if err := utils.NewMetric(s.monitor).Update(); err != nil {
+		s.log.Error(err, "Failed to update metrics", "monitor", s.monitor.Name)
 		// Don't fail reconciliation on metrics error, just log it
 	}
 
-	setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceAvailable,
+	setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceAvailable,
 		"True",
 		"SourceAvailable",
 		"Source Secret is available")
-	setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceLabelFound,
+	setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceLabelFound,
 		"True",
 		"SourceLabelFound",
 		"Source label has been found")
-	setCondition(r.output, expiringsecretv1alpha1.MonitorConditionReady,
+	setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionReady,
 		"True",
 		"Ready",
 		"Monitor is ready")
@@ -170,31 +175,31 @@ func (r *MonitorReconciler) handleSuccess() (ctrl.Result, error) {
 	return ctrl.Result{
 		// Requeue after 1 minute for continuous monitoring
 		RequeueAfter: time.Minute,
-	}, r.Status().Patch(r.ctx, r.output, client.MergeFrom(r.original))
+	}, r.Status().Patch(s.ctx, s.monitor, client.MergeFrom(s.original))
 }
 
-func (r *MonitorReconciler) handleError(err error, reason string, message string) (ctrl.Result, error) {
+func (r *MonitorReconciler) handleError(s *reconcileState, cause error, reason, message string) (ctrl.Result, error) {
 	detailedMessage := message
-	if err != nil {
-		detailedMessage = detailedMessage + ": " + err.Error()
+	if cause != nil {
+		detailedMessage = detailedMessage + ": " + cause.Error()
 	}
-	r.output.Status.State = expiringsecretv1alpha1.MonitorStateError
-	r.output.Status.Message = detailedMessage // Set the error message in status
+	s.monitor.Status.State = expiringsecretv1alpha1.MonitorStateError
+	s.monitor.Status.Message = detailedMessage // Set the error message in status
 
-	r.log.Info("Handling Monitor error", "reason", reason, "message", detailedMessage)
+	s.log.Info("Handling Monitor error", "reason", reason, "message", detailedMessage)
 
 	// Drop the value gauges, whose expiry is unknown, but keep publishing the
 	// state so a failing Monitor stays alertable rather than going silent.
-	if err := utils.NewMetric(r.output).WithLogger(r.log).SetError(); err != nil {
-		r.log.Error(err, "Failed to publish error state metric", "monitor", r.output.Name)
+	if err := utils.NewMetric(s.monitor).WithLogger(s.log).SetError(); err != nil {
+		s.log.Error(err, "Failed to publish error state metric", "monitor", s.monitor.Name)
 	}
 
 	// Always set Ready condition to False on error
-	setCondition(r.output, expiringsecretv1alpha1.MonitorConditionReady, "False", reason, detailedMessage)
+	setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionReady, "False", reason, detailedMessage)
 
 	// Make sure SourceAvailable and ServiceAccountSynced are marked False when we fail
 	if reason == "SourceNotAvailable" || reason == "SourceDataInvalid" {
-		setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceAvailable, "False", reason, detailedMessage)
+		setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceAvailable, "False", reason, detailedMessage)
 	}
 
 	// sourceLabelNotAvailable indicates that the expected label is missing,
@@ -202,190 +207,31 @@ func (r *MonitorReconciler) handleError(err error, reason string, message string
 	// expected format.
 	// Both conditions should be set accordingly based on the error reason.
 	if reason == sourceLabelNotAvailable {
-		setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceLabelFound, "False", reason, detailedMessage)
+		setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceLabelFound, "False", reason, detailedMessage)
 	}
 	if reason == "SourceLabelInvalid" {
-		setCondition(r.output, expiringsecretv1alpha1.MonitorConditionSourceLabelValid, "False", reason, detailedMessage)
+		setCondition(s.monitor, expiringsecretv1alpha1.MonitorConditionSourceLabelValid, "False", reason, detailedMessage)
 	}
 
-	return ctrl.Result{}, r.Status().Patch(r.ctx, r.output, client.MergeFrom(r.original))
+	return ctrl.Result{}, r.Status().Patch(s.ctx, s.monitor, client.MergeFrom(s.original))
 }
 
-func (r *MonitorReconciler) handleDeletion() (ctrl.Result, error) {
-	r.log.Info("Handling Monitor deletion", "name", r.output.Name)
+func (r *MonitorReconciler) handleDeletion(s *reconcileState) (ctrl.Result, error) {
+	s.log.Info("Handling Monitor deletion", "name", s.monitor.Name)
 
-	if !controllerutil.ContainsFinalizer(r.output, monitorFinalizer) {
+	if !controllerutil.ContainsFinalizer(s.monitor, monitorFinalizer) {
 		return ctrl.Result{}, nil
 	}
 
-	utils.NewMetric(r.output).WithLogger(r.log).Cleanup()
+	utils.NewMetric(s.monitor).WithLogger(s.log).Cleanup()
 
-	controllerutil.RemoveFinalizer(r.output, monitorFinalizer)
-	if err := r.Update(r.ctx, r.output); err != nil {
+	controllerutil.RemoveFinalizer(s.monitor, monitorFinalizer)
+	if err := r.Update(s.ctx, s.monitor); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	r.log.Info("Delete complete", "name", r.output.Name)
+	s.log.Info("Delete complete", "name", s.monitor.Name)
 	return ctrl.Result{}, nil
-}
-
-func (r *MonitorReconciler) getSourceObject() (client.Object, error) {
-	// Get the referenced secret
-	secretNamespace := r.output.Spec.SecretRef.Namespace
-	if secretNamespace == "" {
-		secretNamespace = r.output.Namespace
-	}
-
-	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{
-		Name:      r.output.Spec.SecretRef.Name,
-		Namespace: secretNamespace,
-	}
-
-	err := r.Get(r.ctx, secretKey, secret)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("referenced secret not found")
-		}
-		return nil, err
-	}
-
-	return secret, nil
-}
-
-// Parses the expiration timestamp from the secret label
-func (r *MonitorReconciler) parseSourceObject(sourceObj client.Object) (time.Time, *MonitorErrorReasonMessage) {
-	validUntil := time.Time{}
-	labels := sourceObj.GetLabels()
-	if labels == nil {
-		msg := fmt.Sprintf("Source object does not have any labels, expected %s label", LabelKey)
-		r.log.Error(nil, msg, "name", sourceObj.GetName(), "namespace", sourceObj.GetNamespace())
-		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  sourceLabelNotAvailable,
-			Message: msg,
-		}
-	}
-	validUntilStr, exists := labels[LabelKey]
-	if !exists {
-		msg := fmt.Sprintf("Source object does not have %s label", LabelKey)
-		r.log.Error(nil, msg,
-			"name", sourceObj.GetName(),
-			"namespace", sourceObj.GetNamespace(),
-			"availableLabels", labels,
-			"expectedLabel", LabelKey,
-		)
-		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  sourceLabelNotAvailable,
-			Message: msg,
-		}
-	}
-
-	validUntil, err := time.Parse("2006-01-02", validUntilStr)
-	if err != nil {
-		msg := fmt.Sprintf("Failed to parse validUntil date (expected YYYY-MM-DD format): %v", err)
-		r.log.Error(err, "Failed to parse validUntil date", "validUntil", validUntilStr)
-		return validUntil, &MonitorErrorReasonMessage{
-			Reason:  "SourceLabelInvalid",
-			Message: msg,
-		}
-	}
-
-	return validUntil, nil
-}
-
-// mapSecretToMonitor maps a Secret to Monitor objects that reference it
-func (r *MonitorReconciler) mapSecretToMonitor(ctx context.Context, obj client.Object) []ctrl.Request {
-	r.ctx = ctx
-	r.log = log.FromContext(ctx)
-	secret := obj.(*corev1.Secret)
-
-	// Find all monitors that reference this secret
-	monitorList := &expiringsecretv1alpha1.MonitorList{}
-	r.log.Info("Mapping Secret to Monitors", "result", monitorList)
-	if err := r.List(r.ctx, monitorList); err != nil {
-		return nil
-	}
-
-	var requests []ctrl.Request
-	for _, monitor := range monitorList.Items {
-		secretNamespace := monitor.Spec.SecretRef.Namespace
-		if secretNamespace == "" {
-			r.log.Info(
-				"SecretRef namespace is empty, defaulting to Monitor namespace",
-				"monitorNamespace", monitor.Namespace)
-			secretNamespace = monitor.Namespace
-		}
-
-		if monitor.Spec.SecretRef.Name == secret.Name && secretNamespace == secret.Namespace {
-			requests = append(requests, ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      monitor.Name,
-					Namespace: monitor.Namespace,
-				},
-			})
-		}
-	}
-
-	return requests
-}
-
-func monitorCreatePredicate(_ event.CreateEvent) bool {
-	return true
-}
-
-func monitorDeletePredicate(_ event.DeleteEvent) bool {
-	return true
-}
-
-func monitorUpdatePredicate(e event.UpdateEvent) bool {
-	old, ok := e.ObjectOld.(*expiringsecretv1alpha1.Monitor)
-	if !ok {
-		return false
-	}
-	new, ok := e.ObjectNew.(*expiringsecretv1alpha1.Monitor)
-	if !ok {
-		return false
-	}
-	// Reconcile if spec changed
-	if !equality.Semantic.DeepEqual(old.Spec, new.Spec) {
-		return true
-	}
-	// Reconcile if deletion timestamp was added (deletion triggered)
-	if old.DeletionTimestamp == nil && new.DeletionTimestamp != nil {
-		return true
-	}
-	return false
-}
-
-func secretCreatePredicate(_ event.CreateEvent) bool {
-	return true
-}
-
-func secretDeletePredicate(_ event.DeleteEvent) bool {
-	return true
-}
-
-func secretUpdatePredicate(e event.UpdateEvent) bool {
-	// Reconcile if secret data changed
-	oldSecret, ok := e.ObjectOld.(*corev1.Secret)
-	if !ok {
-		return false
-	}
-	newSecret, ok := e.ObjectNew.(*corev1.Secret)
-	if !ok {
-		return false
-	}
-
-	// Check if data changed
-	if len(oldSecret.Data) != len(newSecret.Data) {
-		return true
-	}
-	for k, v := range oldSecret.Data {
-		if string(newSecret.Data[k]) != string(v) {
-			return true
-		}
-	}
-	return false
 }
 
 // SetupWithManager sets up the controller with the Manager.

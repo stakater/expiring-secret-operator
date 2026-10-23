@@ -250,7 +250,7 @@ common-vet: ## Run go vet against code.
 common-test: manifests generate fmt vet envtest ## Run tests with the Go testing framework.
 	@echo "$(FG_BLUE)>> $(FG_GREEN)running all tests$(RESET)"
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
-	go test $(GOOPTS) $(PKGS) -coverprofile cover.out -covermode=atomic -coverpkg=$(ALL_PKGS) $(TEST_ARGS)
+	go test $(GOOPTS) -race $(PKGS) -coverprofile cover.out -covermode=atomic -coverpkg=$(ALL_PKGS) $(TEST_ARGS)
 
 .PHONY: common-check-coverage
 common-check-coverage: gotestcoverage test ## Check code coverage against the defined threshold in .testcoverage-local.yml
