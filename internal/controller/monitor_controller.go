@@ -140,10 +140,11 @@ func (r *MonitorReconciler) handleSuccess(s *reconcileState) (ctrl.Result, error
 
 	applyConditions(s.monitor, ReasonReady, "Monitor is ready")
 
-	return ctrl.Result{
-		// Requeue after 1 minute for continuous monitoring
-		RequeueAfter: time.Minute,
-	}, r.Status().Patch(s.ctx, s.monitor, client.MergeFrom(s.original))
+	if err := r.Status().Patch(s.ctx, s.monitor, client.MergeFrom(s.original)); err != nil {
+		return ctrl.Result{}, err // controller-runtime ignores a Result returned with an error
+	}
+	// Requeue after 1 minute for continuous monitoring
+	return ctrl.Result{RequeueAfter: time.Minute}, nil
 }
 
 // handleSourceError reports a failed Secret lookup: a missing Secret is a
@@ -174,10 +175,19 @@ func (r *MonitorReconciler) handleError(s *reconcileState, cause error, reason, 
 	applyConditions(s.monitor, reason, message)
 
 	patchErr := r.Status().Patch(s.ctx, s.monitor, client.MergeFrom(s.original))
-	if reason == ReasonAPIError { // never (Result{}, nil): that would drop the retry
+	return errorResult(cause, patchErr, reason, message)
+}
+
+// errorResult never returns a requeue delay with an error (controller-runtime
+// ignores it), nor (Result{}, nil) for an API error (that would drop the retry).
+func errorResult(cause, patchErr error, reason, message string) (ctrl.Result, error) {
+	if reason == ReasonAPIError {
 		return ctrl.Result{}, errors.Join(cmp.Or(cause, errors.New(message)), patchErr)
 	}
-	return ctrl.Result{RequeueAfter: time.Minute}, patchErr
+	if patchErr != nil {
+		return ctrl.Result{}, patchErr
+	}
+	return ctrl.Result{RequeueAfter: time.Minute}, nil
 }
 
 // logFailure logs a failing Monitor once: a user error at Info, since the

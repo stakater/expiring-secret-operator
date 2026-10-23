@@ -859,8 +859,13 @@ var _ = Describe("Monitor Controller", func() {
 				Scheme: scheme,
 			}
 
-			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(monitor)})
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(monitor)})
 			Expect(errors.Is(err, patchErr)).To(BeTrue())
+			Expect(result).To(Equal(ctrl.Result{}))
+
+			result, err = reconciler.handleSuccess(newReconcileState(ctx, monitor))
+			Expect(errors.Is(err, patchErr)).To(BeTrue())
+			Expect(result).To(Equal(ctrl.Result{}))
 		})
 
 		It("returns both errors when the Secret read and the status patch fail", func() {
