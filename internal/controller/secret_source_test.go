@@ -37,6 +37,8 @@ import (
 	testutils "github.com/stakater/expiring-secret-operator/test/utils"
 )
 
+const testExpiryDate = "2030-01-01"
+
 var _ = Describe("parseValidUntil", func() {
 	It("should handle a secret missing labels", func() {
 		secret := &corev1.Secret{
@@ -129,10 +131,10 @@ var _ = DescribeTable("secretUpdatePredicate", func(oldLabels, newLabels map[str
 	cur := &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Labels: newLabels}}
 	Expect(secretUpdatePredicate(event.UpdateEvent{ObjectOld: old, ObjectNew: cur})).To(Equal(want))
 },
-	Entry("label added", nil, map[string]string{LabelKey: "2030-01-01"}, true),
-	Entry("label changed", map[string]string{LabelKey: "2030-01-01"}, map[string]string{LabelKey: "2031-01-01"}, true),
-	Entry("label removed", map[string]string{LabelKey: "2030-01-01"}, nil, true),
-	Entry("unrelated label changed", map[string]string{LabelKey: "2030-01-01", "x": "1"}, map[string]string{LabelKey: "2030-01-01", "x": "2"}, false),
+	Entry("label added", nil, map[string]string{LabelKey: testExpiryDate}, true),
+	Entry("label changed", map[string]string{LabelKey: testExpiryDate}, map[string]string{LabelKey: "2031-01-01"}, true),
+	Entry("label removed", map[string]string{LabelKey: testExpiryDate}, nil, true),
+	Entry("unrelated label changed", map[string]string{LabelKey: testExpiryDate, "x": "1"}, map[string]string{LabelKey: testExpiryDate, "x": "2"}, false),
 	Entry("no labels either side", nil, nil, false),
 )
 
@@ -145,13 +147,13 @@ var _ = Describe("getSourceObject", func() {
 
 	It("returns the Secret metadata with the validUntil label", func() {
 		secret := testutils.GenerateValidStringSecret(
-			types.NamespacedName{Name: "meta-only-secret", Namespace: MonitorNamespace}, "2030-01-01")
+			types.NamespacedName{Name: "meta-only-secret", Namespace: MonitorNamespace}, testExpiryDate)
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 		DeferCleanup(k8sClient.Delete, ctx, secret)
 
 		obj, err := r().getSourceObject(monitorFor(secret.Name))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(obj.GetLabels()).To(HaveKeyWithValue(LabelKey, "2030-01-01"))
+		Expect(obj.GetLabels()).To(HaveKeyWithValue(LabelKey, testExpiryDate))
 	})
 
 	It("returns errSecretNotFound for a missing Secret", func() {
@@ -209,7 +211,7 @@ var _ = DescribeTable("mapSecretToMonitor",
 var _ = Describe("stripSecretMetadata", func() {
 	It("drops annotations and managed fields and keeps identity and labels", func() {
 		obj := &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
-			Name: "s", Namespace: "a", Labels: map[string]string{LabelKey: "2030-01-01"},
+			Name: "s", Namespace: "a", Labels: map[string]string{LabelKey: testExpiryDate},
 			Annotations:   map[string]string{"kubectl.kubernetes.io/last-applied-configuration": `{"data":{}}`},
 			ManagedFields: []metav1.ManagedFieldsEntry{{Manager: "kubectl"}},
 		}}
@@ -220,7 +222,7 @@ var _ = Describe("stripSecretMetadata", func() {
 		Expect(got.ManagedFields).To(BeNil())
 		Expect(got.Name).To(Equal("s"))
 		Expect(got.Namespace).To(Equal("a"))
-		Expect(got.Labels).To(HaveKeyWithValue(LabelKey, "2030-01-01"))
+		Expect(got.Labels).To(HaveKeyWithValue(LabelKey, testExpiryDate))
 	})
 
 	It("passes other objects through unchanged", func() {
