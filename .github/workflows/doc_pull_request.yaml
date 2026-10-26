@@ -14,7 +14,7 @@ on:
 
 jobs:
   doc_qa:
-    uses: stakater/.github/.github/workflows/pull_request_doc_qa.yaml@6b627e9d9ebace9ca6e038c118e51edcf2f059e8 # main
+    uses: stakater/.github/.github/workflows/pull_request_doc_qa.yaml@4b120b91baba04b73d3bde21519b3d9f810b3229 # main
     with:
       MD_CONFIG: .github/md_config.json
       DOC_SRC: README.md
