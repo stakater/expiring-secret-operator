@@ -605,7 +605,7 @@ CONTROLLER_TOOLS_VERSION ?= v0.20.1
 # renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest
 ENVTEST_VERSION ?= release-0.19
 # renovate: datasource=go depName=github.com/golangci/golangci-lint/v2/cmd/golangci-lint
-GOLANGCI_LINT_VERSION ?= v2.9.0
+GOLANGCI_LINT_VERSION ?= v2.15.0
 # renovate: datasource=go depName=github.com/arttor/helmify/cmd/helmify
 HELMIFY_VERSION ?= v0.4.19
 # renovate: datasource=go depName=sigs.k8s.io/kind
@@ -675,7 +675,7 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 		ln -sf $$(which golangci-lint) $(GOLANGCI_LINT); \
 	else \
 		echo "$(FG_BLUE)>> $(FG_YELLOW)golangci-lint not found, installing $(GOLANGCI_LINT_VERSION)$(RESET)" ;\
-		GOTOOLCHAIN=go1.25.0 GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) ;\
+		GOTOOLCHAIN=go$$(go list -m -f "{{.GoVersion}}") GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) ;\
 	fi
 
 .PHONY: common-helmify common-helmify-bin

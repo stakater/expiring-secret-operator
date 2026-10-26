@@ -10,7 +10,7 @@ on:
 jobs:
   operator-release:
     name: Operator Release
-    uses: stakater/.github/.github/workflows/operator_release.yaml@4b120b91baba04b73d3bde21519b3d9f810b3229 # main
+    uses: stakater/.github/.github/workflows/operator_release.yaml@ceed844221643dd64c2e65f6a1d6887c172ff1c3 # main
     secrets:
       CONTAINER_REGISTRY_URL: ghcr.io/stakater
       #CONTAINER_REGISTRY_USERNAME: ${{ secrets.GHCR_USERNAME }}
@@ -23,3 +23,4 @@ jobs:
       ENABLE_UNIT_TESTS: true
       #ENABLE_STAKATER_AB_GIT_AUTH: true
       ENABLE_CHART_PUSH: true
+      GO_VERSION: "1.27.3"
