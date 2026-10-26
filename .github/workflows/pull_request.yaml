@@ -16,7 +16,7 @@ on:
 jobs:
   operator-pull-request:
     name: Operator Pull Request
-    uses: stakater/.github/.github/workflows/operator_pull_request.yaml@6b627e9d9ebace9ca6e038c118e51edcf2f059e8 # main
+    uses: stakater/.github/.github/workflows/operator_pull_request.yaml@4b120b91baba04b73d3bde21519b3d9f810b3229 # main
     secrets:
       CONTAINER_REGISTRY_URL: ghcr.io/stakater
       CONTAINER_REGISTRY_USERNAME: stakater-user
