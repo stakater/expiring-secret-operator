@@ -10,8 +10,9 @@ on:
 jobs:
   code_coverage:
     name: Operator Pull Request
-    uses: stakater/.github/.github/workflows/pull_request_coverage.yaml@4b120b91baba04b73d3bde21519b3d9f810b3229 # main
+    uses: stakater/.github/.github/workflows/pull_request_coverage.yaml@ceed844221643dd64c2e65f6a1d6887c172ff1c3 # main
     with:
       ENABLE_LINTING: true
       ENABLE_UNIT_TESTS: true
       TARGET_BRANCH: master
+      GO_VERSION: "1.27.3"
