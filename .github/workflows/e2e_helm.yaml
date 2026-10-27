@@ -30,6 +30,9 @@ on:
       - 'go.mod'
       - 'go.sum'
 
+permissions:
+  contents: read
+
 jobs:
   helm-install-e2e:
     name: Helm Install E2E

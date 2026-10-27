@@ -12,6 +12,10 @@ on:
       - '**/*.md'
       - '!docs/superpowers/**'
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   doc_qa:
     uses: stakater/.github/.github/workflows/pull_request_doc_qa.yaml@8c767c78c2333c8395ae094338451dedff9183d6 # main
