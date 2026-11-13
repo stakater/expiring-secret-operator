@@ -6,12 +6,20 @@
     ":semanticCommits"
   ],
   "rangeStrategy": "replace",
-  "dependencyDashboard": true,
   "dependencyDashboardTitle": "📦 Dependency Updates Dashboard",
   "configMigration": true,
+  "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
     "enabled": true,
-    "labels": ["security"]
+    "description": "Security fixes open a PR immediately, ignoring the release-age hold and PR rate limits.",
+    "labels": [
+      "renovate",
+      "dependencies",
+      "security"
+    ],
+    "groupName": "security",
+    "automerge": true,
+    "automergeType": "pr"
   },
   "labels": [
     "dependencies",
