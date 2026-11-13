@@ -184,7 +184,3 @@ type MonitorList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Monitor `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&Monitor{}, &MonitorList{})
-}
