@@ -6,7 +6,9 @@
     ":semanticCommits"
   ],
   "rangeStrategy": "replace",
-  "dependencyDashboardTitle": "📦 Dependency Updates Dashboard",
+  "dependencyDashboard": {
+    "title": "📦 Dependency Updates Dashboard"
+  },
   "configMigration": true,
   "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
