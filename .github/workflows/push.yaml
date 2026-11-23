@@ -18,7 +18,7 @@ permissions:
 jobs:
   push-operator:
     name: Push Operator
-    uses: stakater/.github/.github/workflows/operator_push.yaml@36e623348c20da24510dfb06bb4a66c73e003c67 # main
+    uses: stakater/.github/.github/workflows/operator_push.yaml@c8fb297b5d664e9a9bc1c7abdf0e89580d39eb9d # main
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.STAKATER_DELIVERY_SLACK_WEBHOOK }}
       CONTAINER_REGISTRY_URL: ghcr.io/stakater
