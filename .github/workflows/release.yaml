@@ -13,7 +13,7 @@ permissions:
 jobs:
   operator-release:
     name: Operator Release
-    uses: stakater/.github/.github/workflows/operator_release.yaml@36e623348c20da24510dfb06bb4a66c73e003c67 # main
+    uses: stakater/.github/.github/workflows/operator_release.yaml@c8fb297b5d664e9a9bc1c7abdf0e89580d39eb9d # main
     secrets:
       CONTAINER_REGISTRY_URL: ghcr.io/stakater
       #CONTAINER_REGISTRY_USERNAME: ${{ secrets.GHCR_USERNAME }}
