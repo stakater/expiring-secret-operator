@@ -15,7 +15,7 @@ permissions:
 jobs:
   code_coverage:
     name: Operator Pull Request
-    uses: stakater/.github/.github/workflows/pull_request_coverage.yaml@dbd95d82b4c924b737bf01ab33a063f6c0f76c7d # main
+    uses: stakater/.github/.github/workflows/pull_request_coverage.yaml@5665ec02e4782d8f4939c33eddbb1f444167d619 # main
     with:
       ENABLE_LINTING: true
       ENABLE_UNIT_TESTS: true
